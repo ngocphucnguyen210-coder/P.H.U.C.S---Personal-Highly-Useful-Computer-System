@@ -31,7 +31,7 @@ def ai_client(vision=False):
     groq_key = setting("GROQ_API_KEY")
     openai_key = setting("OPENAI_API_KEY")
     if groq_key:
-        return OpenAI(api_key=groq_key, base_url="https://api.groq.com/openai/v1"), setting("GROQ_VISION_MODEL" if vision else "GROQ_MODEL", "llama-3.3-70b-versatile")
+        return OpenAI(api_key=groq_key, base_url="https://api.groq.com/openai/v1"), setting("GROQ_VISION_MODEL" if vision else "GROQ_MODEL", "qwen/qwen3.8-27b" if vision else "openai/gpt-oss-120b")
     if openai_key:
         return OpenAI(api_key=openai_key), setting("OPENAI_VISION_MODEL" if vision else "OPENAI_MODEL", "gpt-4.1-mini")
     raise RuntimeError("Thiếu GROQ_API_KEY hoặc OPENAI_API_KEY trong Streamlit Secrets.")
@@ -82,29 +82,58 @@ def generate_image(prompt):
 
 
 def replicate_create(model, prompt, extra_input=None):
+    """Create a Replicate prediction and poll briefly for a finished result.
+
+    MODEL may be `owner/model` or `owner/model:version_id`. Long-running jobs
+    can still return `starting`/`processing`; the UI should expose the prediction URL.
+    """
     token = setting("REPLICATE_API_TOKEN")
     if not token:
         raise RuntimeError("Thiếu REPLICATE_API_TOKEN. Tạo token tại https://replicate.com/account/api-tokens.")
-    if not model or ":" not in model:
-        raise RuntimeError("Hãy cấu hình model Replicate dạng owner/model:version hoặc dùng model slug được API hỗ trợ.")
-    payload = {"version": model.split(":", 1)[1], "input": {"prompt": prompt}}
-    # For version IDs, the owner/model portion is not needed by the predictions endpoint.
-    r = requests.post("https://api.replicate.com/v1/predictions", headers={"Authorization":f"Bearer {token}", "Content-Type":"application/json", "Prefer":"wait=10"}, json=payload, timeout=60)
-    if r.status_code == 404:
-        # The model identifier may be an owner/model slug; use the model endpoint.
-        owner_model = model.split(":", 1)[0]
-        r = requests.post(f"https://api.replicate.com/v1/models/{owner_model}/predictions", headers={"Authorization":f"Bearer {token}", "Content-Type":"application/json", "Prefer":"wait=10"}, json={"input":{"prompt":prompt}}, timeout=60)
+    if not model or "/" not in model:
+        raise RuntimeError("Hãy đặt REPLICATE_VIDEO_MODEL hoặc REPLICATE_MUSIC_MODEL theo dạng owner/model hoặc owner/model:version_id.")
+    headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json", "Prefer": "wait=20"}
+    owner_model, sep, version = model.partition(":")
+    inputs = {"prompt": prompt}
+    if extra_input:
+        inputs.update(extra_input)
+    if sep and version:
+        url = "https://api.replicate.com/v1/predictions"
+        payload = {"version": version, "input": inputs}
+    else:
+        url = f"https://api.replicate.com/v1/models/{owner_model}/predictions"
+        payload = {"input": inputs}
+    r = requests.post(url, headers=headers, json=payload, timeout=90)
+    if r.status_code == 404 and sep and version:
+        # Some model endpoints require owner/model rather than a bare version endpoint.
+        r = requests.post(f"https://api.replicate.com/v1/models/{owner_model}/predictions", headers=headers, json={"version": version, "input": inputs}, timeout=90)
     r.raise_for_status()
     data = r.json()
+    # Prefer wait can return early on slow models. Poll for a short bounded period.
+    deadline = time.time() + 45
+    while data.get("status") in ("starting", "processing") and data.get("urls", {}).get("get") and time.time() < deadline:
+        time.sleep(3)
+        poll = requests.get(data["urls"]["get"], headers={"Authorization": f"Bearer {token}"}, timeout=30)
+        poll.raise_for_status()
+        data = poll.json()
+    if data.get("status") == "failed":
+        raise RuntimeError("Replicate báo tác vụ thất bại: " + str(data.get("error") or "không có chi tiết"))
     return data
 
 
 def supabase_client():
+    """Return the session's authenticated Supabase client when available, else anon client."""
+    try:
+        import streamlit as st
+        existing = st.session_state.get("supabase_oauth_client")
+        if existing is not None:
+            return existing
+    except Exception:
+        pass
     url = setting("SUPABASE_URL")
-    # Service role is only used server-side in this Streamlit app; never expose it in browser code.
-    key = setting("SUPABASE_SERVICE_ROLE_KEY") or setting("SUPABASE_ANON_KEY")
+    key = setting("SUPABASE_ANON_KEY")
     if not url or not key:
-        raise RuntimeError("Cần SUPABASE_URL và SUPABASE_ANON_KEY; các tác vụ quản trị server cần SUPABASE_SERVICE_ROLE_KEY.")
+        raise RuntimeError("Cần SUPABASE_URL và SUPABASE_ANON_KEY. Chỉ dùng SUPABASE_SERVICE_ROLE_KEY trong máy chủ tin cậy, không dùng cho OAuth trên app.")
     from supabase import create_client
     return create_client(url, key)
 
