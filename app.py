@@ -2,6 +2,8 @@ import os
 import time
 import uuid
 import sqlite3
+import base64
+import random
 from datetime import datetime, date, timedelta
 from pathlib import Path
 
@@ -11,6 +13,41 @@ from dotenv import load_dotenv
 load_dotenv()
 APP_DIR = Path(__file__).parent
 DB_PATH = APP_DIR / "phucs.db"
+LOGO_PATH = APP_DIR / "assets" / "phucs_logo.png"
+
+# Load integrations once at startup. If the helper file was omitted from GitHub,
+# or a dependency failed to install, keep the whole app alive and show a useful
+# error only when an integration is used (instead of crashing the entire page).
+def _integration_unavailable(*args, **kwargs):
+    detail = repr(INTEGRATION_IMPORT_ERROR) if INTEGRATION_IMPORT_ERROR else "không rõ nguyên nhân"
+    raise RuntimeError(
+        "Không tải được phucs_integrations.py hoặc thư viện phụ thuộc. "
+        "Hãy bảo đảm file phucs_integrations.py nằm cùng thư mục với app.py, "
+        "requirements.txt đã được cài và redeploy ứng dụng. Chi tiết: " + detail
+    )
+
+def _setting_fallback(name, default=""):
+    try:
+        value = st.secrets.get(name, None)
+        if value is not None and str(value).strip():
+            return str(value).strip()
+    except Exception:
+        pass
+    return os.getenv(name, default).strip()
+
+INTEGRATION_IMPORT_ERROR = None
+try:
+    from phucs_integrations import (
+        setting, tavily_search, analyze_image, transcribe_audio, generate_image,
+        replicate_create, supabase_client, create_checkout_url, upload_supabase_file,
+        group_messages, send_group_message,
+    )
+except Exception as _exc:
+    INTEGRATION_IMPORT_ERROR = _exc
+    setting = _setting_fallback
+    tavily_search = analyze_image = transcribe_audio = generate_image = _integration_unavailable
+    replicate_create = supabase_client = create_checkout_url = upload_supabase_file = _integration_unavailable
+    group_messages = send_group_message = _integration_unavailable
 
 st.set_page_config(
     page_title="P.H.U.C.S AI — Đồng hành cùng bạn",
@@ -84,6 +121,11 @@ def init_db():
           id INTEGER PRIMARY KEY AUTOINCREMENT, user_id TEXT NOT NULL,
           subject TEXT NOT NULL, seconds INTEGER NOT NULL, saved_at TEXT NOT NULL
         );
+        CREATE TABLE IF NOT EXISTS local_group_messages (
+          id INTEGER PRIMARY KEY AUTOINCREMENT, group_id TEXT NOT NULL,
+          user_id TEXT NOT NULL, display_name TEXT NOT NULL, content TEXT NOT NULL,
+          created_at TEXT NOT NULL
+        );
         """)
 init_db()
 
@@ -106,9 +148,10 @@ def login_screen():
     st.markdown("<div style='height:2rem'></div>", unsafe_allow_html=True)
     left, right = st.columns([1.1, 1], gap="large", vertical_alignment="center")
     with left:
+        if LOGO_PATH.exists():
+            st.image(str(LOGO_PATH), use_container_width=True)
         st.markdown("""
         <div class="hero" style="text-align:center;padding:2.1rem 1.2rem">
-          <div style="font-size:5rem">🎓🌸</div>
           <div class="brand">P.H.U.C.S</div>
           <div style="font-size:1.1rem;font-weight:800;color:#a82f62;margin:.35rem 0">
             Personal Highly Useful Computer System
@@ -202,9 +245,14 @@ uid = user["user_id"]
 
 # ---------- Sidebar ----------
 with st.sidebar:
-    st.markdown(f"<div style='text-align:center;font-size:3rem'>🎓🌸</div><div style='text-align:center' class='brand'>P.H.U.C.S</div>", unsafe_allow_html=True)
+    if LOGO_PATH.exists():
+        st.image(str(LOGO_PATH), use_container_width=True)
+    st.markdown("<div style='text-align:center' class='brand'>P.H.U.C.S</div>", unsafe_allow_html=True)
     st.caption("Đồng hành cùng P.H.U.C.S, vững bước thành công")
     st.divider()
+    avatar_file = st.file_uploader("🖼️ Ảnh đại diện (tùy chọn)", type=["png", "jpg", "jpeg", "webp"], key="user_avatar")
+    if avatar_file:
+        st.image(avatar_file, width=88)
     st.markdown(f"### 👤 {user['display_name']}")
     st.caption(f"ID cá nhân: `{uid}`")
     st.caption(f"Tài khoản: {user['provider'].title()}")
@@ -226,15 +274,34 @@ with st.sidebar:
                     unsafe_allow_html=True)
     bg = st.file_uploader("Tải hình nền riêng", type=["png", "jpg", "jpeg", "webp"], key="bg_upload")
     if bg:
-        st.image(bg, caption="Xem trước hình nền")
-        st.caption("Ảnh tải lên hiện là bản xem trước; chưa được lưu làm nền vĩnh viễn.")
+        st.image(bg, caption="Xem trước hình nền", use_container_width=True)
+        if len(bg.getvalue()) <= 5 * 1024 * 1024:
+            encoded_bg = base64.b64encode(bg.getvalue()).decode("ascii")
+            mime = bg.type or "image/png"
+            st.markdown(f"""<style>
+            [data-testid='stAppViewContainer'] {{background-image:linear-gradient(90deg,rgba(255,245,250,.82),rgba(255,245,250,.68)),url('data:{mime};base64,{encoded_bg}') !important;background-size:cover !important;background-position:center !important;background-attachment:fixed !important;}}
+            [data-testid='stHeader'] {{background:rgba(255,245,250,.35) !important;}}
+            [data-testid='stSidebar'] {{background:rgba(255,231,240,.92) !important;backdrop-filter:blur(16px);}}
+            </style>""", unsafe_allow_html=True)
+            st.caption("Đã áp dụng ảnh làm nền toàn trang trong phiên hiện tại. Tải lại file sau khi mở phiên mới.")
+        else:
+            st.warning("Ảnh nền vượt 5 MB. Hãy nén ảnh nhỏ hơn để áp dụng làm nền.")
+    else:
+        # Animated pastel presets; all CSS-only, no external image dependency.
+        if theme == "Dải ngân hà hồng":
+            st.markdown("<style>@keyframes galaxyMove{0%{background-position:0% 50%}100%{background-position:100% 50%}} [data-testid='stAppViewContainer']{background:radial-gradient(circle at 20% 30%,#ffd6ee 0,transparent 28%),radial-gradient(circle at 80% 20%,#d9c7ff 0,transparent 32%),linear-gradient(120deg,#fff0f8,#eadfff,#ffddeb)!important;background-size:220% 220%!important;animation:galaxyMove 18s ease infinite}</style>", unsafe_allow_html=True)
+        elif theme == "Sóng biển hồng":
+            st.markdown("<style>@keyframes waveMove{0%{background-position:0 0}100%{background-position:800px 0}} [data-testid='stAppViewContainer']{background:repeating-radial-gradient(ellipse at 50% 120%,rgba(255,255,255,.5) 0 16px,transparent 18px 42px),linear-gradient(135deg,#ffe5f1,#e4f6ff,#ffd6e9)!important;background-size:auto,240% 240%!important;animation:waveMove 24s linear infinite}</style>", unsafe_allow_html=True)
+        elif theme == "Hồng mộng mơ":
+            st.markdown("<style>@keyframes dreamMove{0%{background-position:0% 40%}50%{background-position:100% 60%}100%{background-position:0% 40%}} [data-testid='stAppViewContainer']{background:linear-gradient(120deg,#fff8fc,#ffe4ef,#f7e7ff,#fff1f7)!important;background-size:300% 300%!important;animation:dreamMove 22s ease infinite}</style>", unsafe_allow_html=True)
     st.divider()
     with st.expander("⚙️ Cài đặt"):
         st.markdown("**P.H.U.C.S AI Plus**")
-        st.write("35.000 VNĐ/năm — mức giá đề xuất, chưa tích hợp thanh toán.")
-        st.write("• Hạn mức sử dụng rộng hơn")
-        st.write("• Dung lượng mục tiêu 500 GB²")
-        st.button("Xem gói Plus", use_container_width=True, disabled=True)
+        st.write("35.000 VNĐ/năm — giá hiển thị tham khảo; cần cấu hình Stripe trước khi thu tiền thật.")
+        st.write("• Hạn mức sử dụng rộng hơn (phải triển khai quyền hạn ở máy chủ)")
+        st.write("• Mục tiêu dung lượng 500 GB; dung lượng thật phụ thuộc gói lưu trữ đã mua")
+        if st.button("Xem gói Plus", use_container_width=True, key="sidebar_plus"):
+            st.session_state["open_plus_tab"] = True
         st.divider()
         st.markdown("**🔔 Thông báo**")
         notif = st.toggle("Bật thông báo", value=True)
@@ -293,7 +360,6 @@ with st.sidebar:
 st.markdown("""
 <div class="hero">
   <div style="display:flex;align-items:center;gap:14px;flex-wrap:wrap">
-    <div style="font-size:3rem">🎓</div>
     <div><div class="brand" style="font-size:2.3rem">P.H.U.C.S AI</div>
     <div class="slogan">Đồng hành cùng P.H.U.C.S, vững bước thành công</div>
     <div class="small-muted">Personal Highly Useful Computer System · Alpha 1</div></div>
@@ -322,7 +388,7 @@ with pages[0]:
 
     api_key = setting("GROQ_API_KEY") or setting("OPENAI_API_KEY")
     provider = "Groq" if setting("GROQ_API_KEY") else ("OpenAI" if setting("OPENAI_API_KEY") else "")
-    model = setting("GROQ_MODEL", "llama-3.3-70b-versatile") if provider == "Groq" else setting("OPENAI_MODEL", "gpt-4.1-mini")
+    model = setting("GROQ_MODEL", "openai/gpt-oss-120b") if provider == "Groq" else setting("OPENAI_MODEL", "gpt-4.1-mini")
     if not api_key:
         st.warning("Chưa cấu hình API. Tạo GROQ_API_KEY tại console.groq.com/keys rồi thêm vào Streamlit Secrets để bật AI.")
     else:
@@ -330,15 +396,38 @@ with pages[0]:
     for message in st.session_state.get("messages", []):
         with st.chat_message(message["role"], avatar="🎓" if message["role"] == "assistant" else "🙂"):
             st.markdown(message["content"])
-    uploaded = st.file_uploader("Đính kèm ảnh bài tập (tùy chọn)", type=["png", "jpg", "jpeg"], key="chat_image")
+    uploaded = st.file_uploader("📷 Đính kèm ảnh bài tập (tùy chọn)", type=["png", "jpg", "jpeg", "webp"], key="chat_image")
     if uploaded:
-        st.image(uploaded, caption="Ảnh đính kèm", width=300)
-        st.caption("Bản starter hiển thị ảnh; xử lý ảnh bằng AI cần bật tích hợp vision.")
+        st.image(uploaded, caption="Ảnh đính kèm sẽ được gửi cho model vision khi bạn đặt câu hỏi.", width=300)
+    use_web = st.checkbox("🌐 Tra cứu Internet và đính kèm nguồn khi trả lời", value=False, key="chat_use_web")
     prompt = st.chat_input("Nhập câu hỏi hoặc bài tập bạn muốn giải...")
     if prompt:
+        augmented_prompt = prompt
+        image_context = ""
+        web_context = ""
+        if uploaded:
+            try:
+                with st.spinner("Đang đọc ảnh bài tập bằng AI vision..."):
+                    image_context = analyze_image(uploaded.getvalue(), uploaded.type or "image/png", prompt)
+                augmented_prompt += "\n\n[Phân tích ảnh đính kèm từ vision]:\n" + image_context
+            except Exception as image_exc:
+                st.warning(f"Không đọc được ảnh bằng model vision: {image_exc}. Hãy cấu hình model vision tương thích.")
+        if use_web:
+            try:
+                with st.spinner("Đang tìm nguồn trên Internet..."):
+                    web_data = tavily_search(prompt, 5)
+                source_lines = []
+                for item in web_data.get("results", [])[:5]:
+                    source_lines.append(f"- {item.get('title','Nguồn')} | {item.get('url','')} | {item.get('content','')[:1200]}")
+                web_context = "\n".join(source_lines)
+                if web_context:
+                    augmented_prompt += "\n\n[Thông tin tìm kiếm web — hãy đối chiếu, nêu rõ giới hạn và không xem snippet là bằng chứng tuyệt đối]:\n" + web_context
+            except Exception as web_exc:
+                st.warning(f"Không tìm được web: {web_exc}")
         st.session_state.messages.append({"role": "user", "content": prompt})
         with st.chat_message("user", avatar="🙂"):
             st.markdown(prompt)
+            if uploaded: st.image(uploaded, width=220)
         answer = None
         if api_key:
             try:
@@ -355,11 +444,15 @@ with pages[0]:
                     "Không bịa nguồn hoặc trích dẫn."
                 )
                 msgs = [{"role": "system", "content": system_prompt}]
-                msgs += [{"role": m["role"], "content": m["content"]} for m in st.session_state.messages[-20:]]
+                recent_messages = st.session_state.messages[-20:]
+                first_index = len(st.session_state.messages) - len(recent_messages)
+                msgs += [{"role": m["role"], "content": (augmented_prompt if first_index + i == len(st.session_state.messages)-1 and m["role"] == "user" else m["content"])} for i, m in enumerate(recent_messages)]
                 with st.chat_message("assistant", avatar="🎓"):
                     with st.spinner("P.H.U.C.S đang suy nghĩ..."):
                         response = client.chat.completions.create(model=model, messages=msgs, temperature=0.25)
                         answer = response.choices[0].message.content
+                        if web_context:
+                            answer += "\n\n### Nguồn tham khảo từ tìm kiếm web\n" + "\n".join([f"- [{item.get('title') or 'Nguồn tham khảo'}]({item.get('url')})" for item in web_data.get("results", [])[:5] if item.get("url")])
                         st.markdown(answer)
             except Exception as e:
                 answer = f"Chưa thể kết nối AI: {e}. Hãy kiểm tra API key, hạn mức và tên model."
@@ -388,14 +481,21 @@ with pages[0]:
                              datetime.now().isoformat(timespec="seconds"), st.session_state.active_chat, uid))
         st.rerun()
     with st.expander("＋ Công cụ bổ sung"):
-        st.write("📷 Ảnh bài tập: có giao diện đính kèm; cần tích hợp vision để AI đọc ảnh.")
-        st.write("🎙️ Voice chat: cần dịch vụ speech-to-text và text-to-speech.")
-        st.write("🎨 Tạo ảnh / 🎬 tạo video / 🎵 tạo nhạc: cần kết nối API tương ứng.")
-        st.write("🌐 Tìm kiếm Internet: cần tích hợp công cụ search có trích dẫn và kiểm tra nguồn.")
+        st.write("📷 Ảnh bài tập: tải ảnh lên, nhập câu hỏi rồi gửi; P.H.U.C.S sẽ gọi model vision nếu đã cấu hình.")
+        st.write("🎙️ Voice chat: mở tab Web & Media AI → Giọng nói để ghi âm/chuyển chữ và đọc câu trả lời.")
+        st.write("🎨 Tạo ảnh / 🎬 video / 🎵 nhạc: mở tab Web & Media AI và cấu hình API tương ứng trong Secrets.")
+        st.write("🌐 Tìm kiếm Internet: bật ô 'Tra cứu Internet' phía trên ô chat; câu trả lời sẽ đính kèm liên kết nguồn nếu Tavily đã cấu hình.")
 
 # ---------- Timer ----------
 with pages[1]:
     st.subheader("⏱️ Đồng hồ tập trung")
+    # Force Streamlit to rerun once per second while timer is active.
+    if st.session_state.get("timer_running"):
+        try:
+            from streamlit_autorefresh import st_autorefresh
+            st_autorefresh(interval=1000, key="phucs_timer_refresh")
+        except Exception:
+            st.caption("Cài streamlit-autorefresh trong requirements.txt để đồng hồ tự cập nhật mỗi giây.")
     subjects = ["Ngữ Văn", "Toán học", "Vật lí", "Hóa học", "Sinh học", "Tiếng Anh", "Lịch sử", "Địa lí", "Tự đặt tên"]
     subject = st.selectbox("Môn học", subjects)
     custom_subject = st.text_input("Tên môn học tùy chỉnh") if subject == "Tự đặt tên" else ""
@@ -434,9 +534,7 @@ with pages[1]:
                             (uid, subject_name, elapsed, datetime.now().isoformat(timespec="seconds")))
             st.success("Đã lưu phiên học.")
     if st.session_state.timer_running:
-        st.caption("Đồng hồ đang chạy. Streamlit có thể cần tương tác/làm mới để cập nhật số hiển thị.")
-        if st.button("↻ Cập nhật đồng hồ"):
-            st.rerun()
+        st.caption("⏱️ Đồng hồ đang tự cập nhật mỗi giây. Chọn Tạm dừng để dừng đếm.")
     with db() as con:
         sessions = con.execute("SELECT subject,seconds,saved_at FROM study_sessions WHERE user_id=? ORDER BY id DESC LIMIT 20", (uid,)).fetchall()
     st.markdown("#### Lịch sử học gần đây")
@@ -511,42 +609,59 @@ with pages[3]:
 
 # ---------- Notes and drawing ----------
 with pages[4]:
-    st.subheader("📝 Note & Studio")
+    st.subheader("📝 Note & Studio Pro")
     mode = st.radio("Chế độ", ["Trình soạn thảo văn bản", "Bảng vẽ Studio Pro"], horizontal=True)
     if mode == "Trình soạn thảo văn bản":
-        with st.form("note_form", clear_on_submit=True):
-            note_title = st.text_input("Tiêu đề ghi chú")
-            note_body = st.text_area("Nội dung", height=240, placeholder="Bắt đầu ghi lại ý tưởng, công thức hoặc kiến thức...")
-            note_submit = st.form_submit_button("💾 Lưu ghi chú", type="primary")
-        if note_submit:
-            if note_title.strip() and note_body.strip():
+        note_title = st.text_input("Tiêu đề ghi chú", key="rich_note_title")
+        st.caption("Trình soạn thảo hỗ trợ định dạng văn bản, phông chữ, màu chữ, highlight, danh sách và ký hiệu học thuật nếu streamlit-quill được cài.")
+        editor_html = ""
+        try:
+            from streamlit_quill import st_quill
+            toolbar = [[{"font": []}, {"size": ["small", False, "large", "huge"]}],
+                       ["bold", "italic", "underline", "strike"],
+                       [{"color": []}, {"background": []}],
+                       [{"script": "sub"}, {"script": "super"}],
+                       [{"header": [1, 2, 3, False]}],
+                       [{"list": "ordered"}, {"list": "bullet"}],
+                       [{"align": []}], ["blockquote", "code-block", "link"], ["clean"]]
+            editor_html = st_quill(placeholder="Soạn ghi chú, công thức, bài học...", html=True, toolbar=toolbar, key="rich_note_editor") or ""
+        except Exception:
+            st.warning("Trình soạn thảo nâng cao chưa tải được; đang dùng chế độ văn bản cơ bản. Kiểm tra streamlit-quill trong requirements.txt.")
+            editor_html = st.text_area("Nội dung ghi chú", height=260, placeholder="Có thể nhập công thức: H₂O, v = s/t, x², ∑, √, π, Δ, →, ⇌, °C...", key="basic_note_body")
+        with st.expander("∑ Ký hiệu Toán – Lý – Hóa – Sinh"):
+            symbols = ["α", "β", "γ", "Δ", "θ", "λ", "μ", "π", "Σ", "Ω", "√", "∛", "∞", "≈", "≠", "≤", "≥", "±", "×", "÷", "∑", "∫", "∂", "∇", "→", "⇌", "°", "℃", "m/s", "mol", "H₂O", "CO₂", "Na⁺", "SO₄²⁻", "x²", "x₁", "Fe³⁺", "DNA", "RNA"]
+            st.write("　".join(f"`{x}`" for x in symbols))
+            st.caption("Có thể sao chép ký hiệu ở trên và dán vào ghi chú. Với Quill, dùng các nút sub/super để định dạng chỉ số.")
+        if st.button("💾 Lưu ghi chú", type="primary", key="save_rich_note"):
+            if note_title.strip() and str(editor_html).strip():
                 with db() as con:
-                    con.execute("INSERT INTO notes(user_id,title,body,created_at) VALUES(?,?,?,?)",
-                                (uid,note_title.strip(),note_body,datetime.now().isoformat(timespec="seconds")))
+                    con.execute("INSERT INTO notes(user_id,title,body,created_at) VALUES(?,?,?,?)", (uid, note_title.strip(), str(editor_html), datetime.now().isoformat(timespec="seconds")))
                 st.success("Đã lưu ghi chú.")
                 st.rerun()
             else:
                 st.error("Vui lòng nhập tiêu đề và nội dung.")
     else:
-        st.caption("Bản vẽ canvas tối giản: vẽ bằng chuột/touch, chọn màu và tải ảnh xuống bằng trình duyệt.")
-        st.components.v1.html("""
-        <div style="font-family:sans-serif;background:#fff7fb;border:1px solid #efb5cc;border-radius:16px;padding:12px">
-          <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:8px">
-            <label>Màu <input id="color" type="color" value="#d94f83"></label>
-            <label>Nét <input id="width" type="range" min="1" max="24" value="4"></label>
-            <button id="clear">Xóa bảng</button><button id="download">Tải PNG</button>
-          </div>
-          <canvas id="pad" width="900" height="430" style="width:100%;height:auto;background:white;border:1px solid #e9c4d4;border-radius:10px;touch-action:none"></canvas>
-        </div>
-        <script>
-        const c=document.getElementById('pad'),x=c.getContext('2d'); x.lineCap='round'; let down=false,last=null;
-        c.addEventListener('pointerdown',e=>{down=true;last=pos(e);c.setPointerCapture(e.pointerId)});
-        c.addEventListener('pointerup',()=>{down=false;last=null});
-        c.addEventListener('pointermove',e=>{if(!down)return;let p=pos(e);x.strokeStyle=document.getElementById('color').value;x.lineWidth=document.getElementById('width').value;x.beginPath();x.moveTo(last.x,last.y);x.lineTo(p.x,p.y);x.stroke();last=p});
+        st.caption("Studio Pro: bút bi, bút cọ, bút kim, highlight, tẩy, đường liền/nét đứt, hình chữ nhật, hình tròn, tam giác và tải PNG.")
+        st.components.v1.html(r"""<!doctype html><html><head><style>
+        body{font-family:Arial;background:#fff4f8;margin:0;padding:10px;color:#74314f} .toolbar{display:flex;gap:7px;flex-wrap:wrap;margin-bottom:9px;align-items:center}
+        button,select{border:1px solid #e8a7c2;background:white;border-radius:8px;padding:7px;color:#74314f;font-weight:600} canvas{display:block;width:100%;height:auto;background:#fff;border:1px solid #e8a7c2;border-radius:12px;touch-action:none}
+        </style></head><body><div class="toolbar">
+        <select id="tool"><option value="pen">Bút bi</option><option value="brush">Bút cọ</option><option value="fine">Bút kim</option><option value="highlighter">Highlight</option><option value="eraser">Tẩy</option><option value="line">Đường thẳng liền</option><option value="dashed">Đường nét đứt</option><option value="rect">Hình chữ nhật</option><option value="circle">Hình tròn</option><option value="triangle">Tam giác</option></select>
+        <label>Màu <input id="color" type="color" value="#d94f83"></label><label>Nét <input id="width" type="range" min="1" max="30" value="4"></label>
+        <button id="undo">↶ Hoàn tác</button><button id="clear">🗑 Tẩy hết</button><button id="download">⬇ Tải PNG</button></div>
+        <canvas id="pad" width="1200" height="620"></canvas><script>
+        const c=document.getElementById('pad'),ctx=c.getContext('2d');ctx.lineCap='round';ctx.lineJoin='round';ctx.fillStyle='#fff';ctx.fillRect(0,0,c.width,c.height);let down=false,start=null,last=null,history=[];
+        function save(){history.push(ctx.getImageData(0,0,c.width,c.height));if(history.length>30)history.shift()} save();
         function pos(e){let r=c.getBoundingClientRect();return{x:(e.clientX-r.left)*c.width/r.width,y:(e.clientY-r.top)*c.height/r.height}}
-        document.getElementById('clear').onclick=()=>x.clearRect(0,0,c.width,c.height);
-        document.getElementById('download').onclick=()=>{let a=document.createElement('a');a.download='phucs-drawing.png';a.href=c.toDataURL();a.click()};
-        </script>""", height=540)
+        function style(){let t=document.getElementById('tool').value;ctx.globalCompositeOperation=t==='eraser'?'destination-out':'source-over';ctx.strokeStyle=document.getElementById('color').value;ctx.lineWidth=+document.getElementById('width').value;ctx.globalAlpha=t==='highlighter'?.24:1;if(t==='brush')ctx.lineWidth*=2.5;if(t==='fine')ctx.lineWidth=Math.min(ctx.lineWidth,2);ctx.setLineDash(t==='dashed'?[12,8]:[])}
+        function shape(a,b,t){style();ctx.beginPath();if(t==='line'||t==='dashed'){ctx.moveTo(a.x,a.y);ctx.lineTo(b.x,b.y)}else if(t==='rect'){ctx.rect(a.x,a.y,b.x-a.x,b.y-a.y)}else if(t==='circle'){let r=Math.hypot(b.x-a.x,b.y-a.y);ctx.arc(a.x,a.y,r,0,Math.PI*2)}else if(t==='triangle'){ctx.moveTo((a.x+b.x)/2,a.y);ctx.lineTo(a.x,b.y);ctx.lineTo(b.x,b.y);ctx.closePath()}ctx.stroke();ctx.globalAlpha=1;ctx.globalCompositeOperation='source-over';ctx.setLineDash([])}
+        c.addEventListener('pointerdown',e=>{save();down=true;start=last=pos(e);c.setPointerCapture(e.pointerId);if(['line','dashed','rect','circle','triangle'].includes(document.getElementById('tool').value)){} });
+        c.addEventListener('pointermove',e=>{if(!down)return;let p=pos(e),t=document.getElementById('tool').value;if(['line','dashed','rect','circle','triangle'].includes(t)){let snap=history[history.length-1];ctx.putImageData(snap,0,0);shape(start,p,t)}else{style();ctx.beginPath();ctx.moveTo(last.x,last.y);ctx.lineTo(p.x,p.y);ctx.stroke();ctx.globalAlpha=1;ctx.globalCompositeOperation='source-over';last=p}});
+        c.addEventListener('pointerup',()=>{down=false;start=last=null;ctx.globalAlpha=1;ctx.globalCompositeOperation='source-over';ctx.setLineDash([])});
+        document.getElementById('clear').onclick=()=>{save();ctx.clearRect(0,0,c.width,c.height);ctx.fillStyle='#fff';ctx.fillRect(0,0,c.width,c.height)};
+        document.getElementById('undo').onclick=()=>{if(history.length>1){history.pop();ctx.putImageData(history[history.length-1],0,0)}};
+        document.getElementById('download').onclick=()=>{let a=document.createElement('a');a.download='phucs-studio.png';a.href=c.toDataURL('image/png');a.click()};
+        </script></body></html>""", height=720, scrolling=True)
     st.markdown("#### Kho lưu trữ ghi chú")
     with db() as con:
         notes = con.execute("SELECT id,title,body,created_at FROM notes WHERE user_id=? ORDER BY id DESC", (uid,)).fetchall()
@@ -554,16 +669,22 @@ with pages[4]:
         st.caption("Chưa có ghi chú được lưu.")
     for n in notes:
         with st.expander(f"🗒️ {n['title']} · {n['created_at'][:10]}"):
-            st.write(n["body"])
+            # Render only a small allowlist of formatting tags saved by the rich-text editor.
+            try:
+                import bleach
+                safe_html = bleach.clean(n['body'], tags=['p','br','strong','b','em','i','u','s','ol','ul','li','h1','h2','h3','blockquote','pre','code','span','div','sub','sup','a'], attributes={'a':['href','target'], 'span':['style'], 'div':['style']}, protocols=['http','https','mailto'])
+                st.markdown(safe_html, unsafe_allow_html=True)
+            except Exception:
+                st.text(n['body'])
             if st.button("Xóa ghi chú", key=f"delete_note_{n['id']}"):
-                with db() as con: con.execute("DELETE FROM notes WHERE id=? AND user_id=?", (n["id"],uid))
+                with db() as con: con.execute("DELETE FROM notes WHERE id=? AND user_id=?", (n['id'],uid))
                 st.rerun()
 
 # ---------- Charts ----------
 with pages[5]:
     st.subheader("📊 Tạo biểu đồ")
     st.caption("Nhập dữ liệu theo từng dòng, mỗi dòng gồm nhãn và giá trị, phân cách bằng dấu phẩy.")
-    chart_type = st.selectbox("Loại biểu đồ", ["Biểu đồ cột", "Biểu đồ đường", "Biểu đồ tròn", "Biểu đồ miền"])
+    chart_type = st.selectbox("Loại biểu đồ", ["Biểu đồ cột dọc", "Biểu đồ thanh ngang", "Biểu đồ đường", "Biểu đồ miền", "Biểu đồ tròn / quạt"])
     data_text = st.text_area("Dữ liệu", value="Toán,8\nVăn,7\nTiếng Anh,9", height=120)
     if st.button("Vẽ biểu đồ", type="primary"):
         import pandas as pd
@@ -576,7 +697,15 @@ with pages[5]:
                 pass
         if rows:
             frame = pd.DataFrame(rows).set_index("Mục")
-            if chart_type == "Biểu đồ cột": st.bar_chart(frame)
+            if chart_type == "Biểu đồ cột dọc": st.bar_chart(frame)
+            elif chart_type == "Biểu đồ thanh ngang":
+                try:
+                    import plotly.express as px
+                    fig = px.bar(pd.DataFrame(rows), x="Giá trị", y="Mục", orientation="h", color="Mục", title="Biểu đồ thanh ngang")
+                    st.plotly_chart(fig, use_container_width=True)
+                except Exception:
+                    st.dataframe(pd.DataFrame(rows).sort_values("Giá trị"), use_container_width=True)
+                    st.caption("Cài plotly để hiển thị biểu đồ thanh ngang tương tác.")
             elif chart_type == "Biểu đồ đường": st.line_chart(frame)
             elif chart_type == "Biểu đồ miền": st.area_chart(frame)
             else: st.vega_lite_chart(
@@ -592,7 +721,9 @@ with pages[5]:
 # ---------- Games ----------
 with pages[6]:
     st.subheader("🎮 Góc giải trí lành mạnh")
-    st.write("Chọn một trò chơi ngắn để thư giãn giữa các phiên học.")
+    st.markdown("<div class='hero'><h3>🌸 Học vui mỗi ngày</h3><p>Chọn một thử thách ngắn để nạp lại năng lượng sau khi học.</p><div style='font-size:2rem;letter-spacing:.25rem'>🧩 🎯 🧠 🚀 🪄 🐼 🌈 🎨</div></div>", unsafe_allow_html=True)
+    if LOGO_PATH.exists():
+        st.image(str(LOGO_PATH), width=150, caption="Mascot P.H.U.C.S — chinh phục tri thức")
     games = {
         "Đố vui kiến thức": "Trả lời câu hỏi kiến thức tổng hợp.",
         "Đoán số": "Đoán một số từ 1 đến 20.",
@@ -630,43 +761,121 @@ with pages[6]:
         if st.button("Chấm đáp án"):
             if ans==a*b: st.success("Đúng rồi!"); st.session_state.math_question=(random.randint(2,12),random.randint(2,12))
             else: st.error("Chưa đúng, thử lại nhé.")
+    else:
+        st.markdown(f"### 🌈 Thử thách: {game}")
+        st.caption("Các trò chơi mẫu dùng câu hỏi tương tác để bạn có thể chơi ngay. Một số trò chuyên biệt sẽ được phát triển sâu hơn ở các phiên bản sau.")
+        quiz_bank = [
+            ("Hành tinh nào gần Mặt Trời nhất?", ["Sao Thủy", "Trái Đất", "Sao Hỏa"], "Sao Thủy"),
+            ("Tích của 7 × 8 là bao nhiêu?", ["54", "56", "64"], "56"),
+            ("Công thức hóa học của nước là gì?", ["CO₂", "H₂O", "O₂"], "H₂O"),
+            ("Từ tiếng Anh 'library' nghĩa là gì?", ["Hiệu sách", "Thư viện", "Phòng thí nghiệm"], "Thư viện"),
+            ("Một tam giác có tổng ba góc bằng bao nhiêu?", ["90°", "180°", "360°"], "180°"),
+            ("Cơ quan nào bơm máu trong cơ thể người?", ["Phổi", "Tim", "Gan"], "Tim"),
+        ]
+        if st.session_state.get("quiz_game_name") != game:
+            st.session_state.quiz_game_name = game
+            st.session_state.quiz_game_item = random.choice(quiz_bank)
+        q, opts, correct = st.session_state.quiz_game_item
+        st.markdown(f"<div class='hero'><div style='font-size:2.4rem'>🧠 ✨ 🎯</div><h3>{q}</h3></div>", unsafe_allow_html=True)
+        answer_choice = st.radio("Chọn đáp án", opts, key=f"quiz_answer_{game}")
+        if st.button("Kiểm tra đáp án", key=f"quiz_check_{game}", type="primary"):
+            if answer_choice == correct:
+                st.success("Chính xác! Tuyệt vời 🌸")
+                st.session_state.quiz_game_item = random.choice([item for item in quiz_bank if item != st.session_state.quiz_game_item])
+            else:
+                st.error(f"Chưa chính xác. Đáp án đúng là: {correct}")
+        if st.button("Câu hỏi mới", key=f"quiz_new_{game}"):
+            st.session_state.quiz_game_item = random.choice(quiz_bank)
+            st.rerun()
 
 # ---------- Lab ----------
 with pages[7]:
-    st.subheader("🧪 Phòng thí nghiệm ảo")
-    lab = st.selectbox("Chọn mô phỏng", ["Quỹ đạo hành tinh (mô hình khái niệm)", "Đồ thị hàm số bậc hai", "Chuyển động thẳng đều", "Mô hình tam giác"])
-    if lab == "Quỹ đạo hành tinh (mô hình khái niệm)":
-        st.write("Mô hình minh họa quỹ đạo tròn đơn giản, không dùng để dự đoán thiên văn chính xác.")
-        import numpy as np
-        import pandas as pd
-        angle = np.linspace(0, 2*np.pi, 180)
-        st.line_chart(pd.DataFrame({"x":np.cos(angle),"y":np.sin(angle)}))
-        st.caption("Đây là đồ thị tham số minh họa, chưa phải mô phỏng hấp dẫn N-body.")
-    elif lab == "Đồ thị hàm số bậc hai":
-        import numpy as np
-        import pandas as pd
-        a = st.slider("Hệ số a", -5.0, 5.0, 1.0, 0.5)
-        b = st.slider("Hệ số b", -10.0, 10.0, 0.0, 0.5)
-        c = st.slider("Hệ số c", -10.0, 10.0, 0.0, 0.5)
-        x = np.linspace(-10,10,201)
-        st.line_chart(pd.DataFrame({"y=ax²+bx+c":a*x*x+b*x+c}, index=x))
-    elif lab == "Chuyển động thẳng đều":
-        v = st.slider("Vận tốc (m/s)", 0.0, 30.0, 5.0)
-        import pandas as pd
-        t = list(range(0,11))
-        st.line_chart(pd.DataFrame({"Quãng đường (m)":[v*i for i in t]}, index=t))
-        st.caption("Công thức: s = v × t, giả sử vận tốc không đổi.")
+    st.subheader("🧪 Phòng thí nghiệm ảo — 30 mô phỏng")
+    lab_names = [
+      "01. Quỹ đạo hành tinh", "02. Pha Mặt Trăng", "03. Hệ Mặt Trời theo tỷ lệ", "04. Trọng lực và khối lượng",
+      "05. Chuyển động thẳng đều", "06. Chuyển động nhanh dần đều", "07. Ném ngang", "08. Dao động con lắc",
+      "09. Sóng âm", "10. Sóng cơ", "11. Định luật Ohm", "12. Mạch điện nối tiếp/song song",
+      "13. Thấu kính hội tụ", "14. Phản xạ ánh sáng", "15. Khúc xạ ánh sáng", "16. Lực đẩy Archimedes",
+      "17. Áp suất chất lỏng", "18. Nhiệt độ và truyền nhiệt", "19. Phản ứng hóa học và bảo toàn khối lượng", "20. pH dung dịch",
+      "21. Cấu tạo nguyên tử", "22. Di truyền Mendel", "23. Hệ sinh thái", "24. Phân bào khái niệm",
+      "25. Đồ thị hàm số bậc hai", "26. Tam giác vuông", "27. Đường tròn lượng giác", "28. Xác suất gieo xúc xắc",
+      "29. Thống kê và phân phối", "30. Hình học 3D — thể tích"
+    ]
+    lab = st.selectbox("Chọn mô phỏng", lab_names)
+    st.info("Các mô phỏng dưới đây dùng công thức giáo dục đơn giản để minh họa, không thay thế mô hình nghiên cứu chuyên ngành.")
+    if "01." in lab or "02." in lab or "03." in lab or "04." in lab:
+        import numpy as np, pandas as pd
+        if "01." in lab:
+            radius=st.slider("Bán kính quỹ đạo (đơn vị tùy chọn)",1.0,10.0,4.0); angle=np.linspace(0,2*np.pi,240)
+            st.line_chart(pd.DataFrame({"x":radius*np.cos(angle),"y":radius*np.sin(angle)})); st.caption("Quỹ đạo tròn minh họa, không phải mô hình N-body chính xác.")
+        elif "02." in lab:
+            phase=st.slider("Pha Mặt Trăng (%)",0,100,50); st.progress(phase/100); st.write("Pha minh họa:", "Trăng non" if phase<12 else "Lưỡi liềm" if phase<38 else "Bán nguyệt" if phase<62 else "Trăng khuyết/gần tròn" if phase<88 else "Trăng tròn")
+        elif "03." in lab:
+            scale=st.slider("Hệ số tỷ lệ khoảng cách",0.1,3.0,1.0,0.1); st.bar_chart(pd.DataFrame({"Khoảng cách minh họa": [0,0.39*scale,0.72*scale,1*scale,1.52*scale,5.2*scale,9.5*scale]},index=["Mặt Trời","Thủy","Kim","Trái Đất","Hỏa","Mộc","Thổ"]))
+        else:
+            m=st.slider("Khối lượng (kg)",1.0,100.0,10.0); g=st.slider("Gia tốc trọng trường (m/s²)",0.1,25.0,9.81); st.metric("Trọng lượng F = mg",f"{m*g:.2f} N")
+    elif "05." in lab or "06." in lab or "07." in lab:
+        import numpy as np, pandas as pd
+        v=st.slider("Vận tốc ban đầu (m/s)",0.0,40.0,5.0); a=st.slider("Gia tốc (m/s²)",-10.0,10.0,2.0); tmax=st.slider("Thời gian mô phỏng (s)",1,30,10); t=np.linspace(0,tmax,101)
+        if "05." in lab: x=v*t; st.caption("s = v·t")
+        elif "06." in lab: x=v*t+0.5*a*t*t; st.caption("s = v₀t + ½at²")
+        else: angle=st.slider("Góc ném (độ)",5,85,45); g=9.81; rad=np.deg2rad(angle); x=v*np.cos(rad)*t; y=v*np.sin(rad)*t-0.5*g*t*t; st.line_chart(pd.DataFrame({"Độ cao (m)":y[y>=0]},index=x[:len(y[y>=0])]))
+        if "07." not in lab: st.line_chart(pd.DataFrame({"Quãng đường (m)":x},index=t))
+    elif "08." in lab:
+        import numpy as np,pandas as pd
+        L=st.slider("Chiều dài con lắc (m)",0.1,5.0,1.0); theta=st.slider("Góc ban đầu (độ)",1,45,15); t=np.linspace(0,10,300); T=2*np.pi*(L/9.81)**0.5; st.metric("Chu kỳ gần đúng",f"{T:.2f} s"); st.line_chart(pd.DataFrame({"Góc (độ)":theta*np.cos(2*np.pi*t/T)},index=t))
+    elif any(x in lab for x in ["09.","10."]):
+        import numpy as np,pandas as pd
+        freq=st.slider("Tần số (Hz)",1,20,4); amp=st.slider("Biên độ",0.1,5.0,1.0); x=np.linspace(0,4*np.pi,300); st.line_chart(pd.DataFrame({"Li độ":amp*np.sin(freq*x/4)},index=x)); st.metric("Tần số minh họa",f"{freq} Hz")
+    elif "11." in lab or "12." in lab:
+        voltage=st.slider("Điện áp U (V)",0.0,24.0,12.0); resistance=st.slider("Điện trở R (Ω)",1.0,100.0,6.0); st.metric("Dòng điện I=U/R",f"{voltage/resistance:.3f} A"); st.metric("Công suất P=UI",f"{voltage*voltage/resistance:.2f} W"); st.caption("Mô hình điện trở lý tưởng theo định luật Ohm.")
+    elif any(x in lab for x in ["13.","14.","15."]):
+        f=st.slider("Tiêu cự / tham số (cm)",5.0,50.0,20.0); d=st.slider("Khoảng cách vật (cm)",5.0,100.0,40.0)
+        if "13." in lab:
+            denom=(1/f-1/d); st.metric("Khoảng cách ảnh", "Ảnh ở vô cực" if abs(denom)<1e-6 else f"{1/denom:.2f} cm"); st.caption("Công thức thấu kính mỏng 1/f = 1/dᵥ + 1/dₐ, dấu quy ước được giản lược.")
+        else:
+            n=st.slider("Chiết suất môi trường",1.0,2.5,1.33); angle=st.slider("Góc tới (độ)",0,80,30); import math; val=math.sin(math.radians(angle))/n; st.metric("Góc khúc xạ gần đúng",f"{math.degrees(math.asin(min(1,val))):.1f}°")
+    elif "16." in lab or "17." in lab:
+        rho=st.slider("Khối lượng riêng (kg/m³)",100.0,13000.0,1000.0); volume=st.slider("Thể tích (lít)",0.1,100.0,2.0); depth=st.slider("Độ sâu (m)",0.0,50.0,3.0); st.metric("Lực đẩy Archimedes",f"{rho*9.81*volume/1000:.2f} N"); st.metric("Áp suất thủy tĩnh",f"{rho*9.81*depth:.0f} Pa")
+    elif "18." in lab:
+        mass=st.slider("Khối lượng (kg)",0.1,10.0,1.0); c=st.slider("Nhiệt dung riêng (J/kg·K)",100.0,5000.0,4200.0); dt=st.slider("Độ tăng nhiệt (°C)",1,100,20); st.metric("Nhiệt lượng Q=mcΔT",f"{mass*c*dt:,.0f} J")
+    elif any(x in lab for x in ["19.","20.","21."]):
+        if "19." in lab:
+            m1=st.slider("Khối lượng chất phản ứng A (g)",1,100,20); m2=st.slider("Khối lượng chất phản ứng B (g)",1,100,30); st.metric("Tổng khối lượng trước phản ứng",f"{m1+m2} g"); st.caption("Theo mô hình hệ kín, tổng khối lượng được bảo toàn.")
+        elif "20." in lab:
+            ph=st.slider("pH",0.0,14.0,7.0,0.1); st.metric("Môi trường", "Axit" if ph<7 else "Trung tính" if ph==7 else "Bazơ")
+        else:
+            protons=st.slider("Số proton",1,20,6); neutrons=st.slider("Số neutron",0,30,6); st.metric("Số khối A = p + n",protons+neutrons); st.caption("Mô hình nguyên tử đơn giản, không biểu diễn quỹ đạo electron thực.")
+    elif any(x in lab for x in ["22.","23.","24."]):
+        if "22." in lab:
+            A=st.selectbox("Kiểu gen bố mẹ",["Aa × Aa","AA × aa","Aa × aa"]); ratios={"Aa × Aa":"25% AA · 50% Aa · 25% aa","AA × aa":"100% Aa","Aa × aa":"50% Aa · 50% aa"}; st.success("Tỷ lệ kiểu gen lý thuyết: "+ratios[A])
+        elif "23." in lab:
+            sun=st.slider("Năng lượng mặt trời (đơn vị tương đối)",10,100,80); st.metric("Năng lượng đến sinh vật sản xuất",f"{sun} đơn vị"); st.metric("Năng lượng truyền lên bậc tiếp theo (quy tắc 10%)",f"{sun*0.1:.1f} đơn vị")
+        else:
+            n=st.slider("Số lần phân bào nguyên phân",1,8,3); st.metric("Số tế bào con lý thuyết",2**n)
+    elif "25." in lab:
+        import numpy as np,pandas as pd
+        a=st.slider("Hệ số a",-5.0,5.0,1.0,0.5); b=st.slider("Hệ số b",-10.0,10.0,0.0,0.5); c=st.slider("Hệ số c",-10.0,10.0,0.0,0.5); x=np.linspace(-10,10,201); st.line_chart(pd.DataFrame({"y=ax²+bx+c":a*x*x+b*x+c},index=x))
+    elif "26." in lab:
+        x=st.slider("Cạnh góc vuông a",1.0,30.0,3.0); y=st.slider("Cạnh góc vuông b",1.0,30.0,4.0); st.metric("Diện tích",f"{x*y/2:.2f} đơn vị²"); st.metric("Cạnh huyền",f"{(x*x+y*y)**.5:.2f}")
+    elif "27." in lab:
+        import numpy as np,pandas as pd
+        ang=st.slider("Góc θ (độ)",-360,360,45); st.metric("sin θ",f"{np.sin(np.deg2rad(ang)):.3f}"); st.metric("cos θ",f"{np.cos(np.deg2rad(ang)):.3f}"); st.metric("tan θ", "không xác định" if abs(np.cos(np.deg2rad(ang)))<1e-8 else f"{np.tan(np.deg2rad(ang)):.3f}")
+    elif "28." in lab:
+        import random
+        sides=st.slider("Số mặt xúc xắc",2,20,6); trials=st.slider("Số lần gieo mô phỏng",10,1000,100,10); values=[random.randint(1,sides) for _ in range(trials)]; import pandas as pd; st.bar_chart(pd.Series(values).value_counts().sort_index()); st.caption("Kết quả mô phỏng ngẫu nhiên; tần suất dao động khi số lần thử nhỏ.")
+    elif "29." in lab:
+        import numpy as np,pandas as pd
+        n=st.slider("Số điểm dữ liệu",10,1000,100,10); mu=st.slider("Trung bình μ",-10.0,10.0,0.0); sigma=st.slider("Độ lệch chuẩn σ",0.1,10.0,1.0); vals=np.random.normal(mu,sigma,n); st.bar_chart(pd.Series(vals).round(0).value_counts().sort_index()); st.metric("Trung bình mẫu",f"{vals.mean():.2f}"); st.metric("Độ lệch chuẩn mẫu",f"{vals.std():.2f}")
     else:
-        st.write("Nhập cạnh để tính diện tích tam giác vuông.")
-        x = st.number_input("Cạnh góc vuông thứ nhất", min_value=0.0, value=3.0)
-        y = st.number_input("Cạnh góc vuông thứ hai", min_value=0.0, value=4.0)
-        st.metric("Diện tích", f"{x*y/2:.2f} đơn vị²")
-        st.metric("Cạnh huyền", f"{(x*x+y*y)**0.5:.2f} đơn vị")
+        shape=st.selectbox("Khối hình",["Lập phương","Hộp chữ nhật","Hình trụ","Hình cầu"]); a=st.slider("Kích thước 1 (cm)",1.0,30.0,5.0); b=st.slider("Kích thước 2 / bán kính (cm)",1.0,30.0,4.0); h=st.slider("Chiều cao (cm)",1.0,30.0,6.0); import math
+        vol=a**3 if shape=="Lập phương" else a*b*h if shape=="Hộp chữ nhật" else math.pi*b*b*h if shape=="Hình trụ" else 4*math.pi*b**3/3; st.metric("Thể tích",f"{vol:.2f} cm³")
 
 # ---------- Web search, vision, voice and generation ----------
 with pages[8]:
     st.subheader("🌐 Tìm kiếm Internet có nguồn & Media AI")
-    from phucs_integrations import setting, tavily_search, analyze_image, transcribe_audio, generate_image, replicate_create
+    if INTEGRATION_IMPORT_ERROR:
+        st.warning("Một số tích hợp chưa tải được. Ứng dụng vẫn chạy; hãy kiểm tra file phucs_integrations.py và requirements.txt. Chi tiết lỗi: " + str(INTEGRATION_IMPORT_ERROR))
     mode = st.radio("Công cụ", ["Tìm kiếm Internet", "Phân tích ảnh bằng AI", "Giọng nói", "Tạo ảnh AI", "Tạo video AI", "Tạo nhạc AI"], horizontal=True)
     if mode == "Tìm kiếm Internet":
         query = st.text_input("Bạn muốn tìm thông tin gì?", placeholder="Ví dụ: định luật Newton nguồn giáo dục đáng tin cậy")
@@ -750,26 +959,46 @@ with pages[8]:
 # ---------- Group chat and video calls ----------
 with pages[9]:
     st.subheader("👥 Nhóm học tập & phòng gọi video")
-    from phucs_integrations import setting, group_messages, send_group_message
     group_id = st.text_input("Mã nhóm", value="lop-hoc-1", help="Mọi người dùng cùng mã nhóm để xem cùng phòng chat.")
     st.markdown("#### 💬 Tin nhắn nhóm")
-    if setting("SUPABASE_URL") and setting("SUPABASE_ANON_KEY"):
-        if st.button("↻ Tải tin nhắn", key="load_group_msgs"):
-            try: st.session_state["group_msgs"] = group_messages(group_id)
-            except Exception as exc: st.error(f"Không tải được tin nhắn: {exc}")
-        for msg in st.session_state.get("group_msgs", []):
-            st.markdown(f"**{msg.get('display_name','Học viên')}** · <small>{msg.get('created_at','')}</small>  \n{msg.get('content','')}", unsafe_allow_html=True)
-        with st.form("group_message_form", clear_on_submit=True):
-            content = st.text_input("Tin nhắn mới", max_chars=2000)
-            send = st.form_submit_button("Gửi tin nhắn", type="primary")
-        if send and content.strip():
-            try:
+    remote_group = bool(setting("SUPABASE_URL") and setting("SUPABASE_ANON_KEY"))
+    if st.button("↻ Tải tin nhắn", key="load_group_msgs"):
+        try:
+            if remote_group:
+                st.session_state["group_msgs"] = group_messages(group_id)
+            else:
+                with db() as con:
+                    rows = con.execute("SELECT group_id,user_id,display_name,content,created_at FROM local_group_messages WHERE group_id=? ORDER BY id DESC LIMIT 50", (group_id,)).fetchall()
+                st.session_state["group_msgs"] = [dict(r) for r in reversed(rows)]
+        except Exception as exc:
+            st.warning(f"Không truy cập được Supabase ({exc}); đang hiển thị kho chat cục bộ của phiên triển khai.")
+            with db() as con:
+                rows = con.execute("SELECT group_id,user_id,display_name,content,created_at FROM local_group_messages WHERE group_id=? ORDER BY id DESC LIMIT 50", (group_id,)).fetchall()
+            st.session_state["group_msgs"] = [dict(r) for r in reversed(rows)]
+    for msg in st.session_state.get("group_msgs", []):
+        st.markdown(f"**{msg.get('display_name','Học viên')}** · {msg.get('created_at','')}  \n{msg.get('content','')}")
+    with st.form("group_message_form", clear_on_submit=True):
+        content = st.text_input("Tin nhắn mới", max_chars=2000)
+        send = st.form_submit_button("Gửi tin nhắn", type="primary")
+    if send and content.strip():
+        try:
+            if remote_group:
                 send_group_message(group_id, uid, user["display_name"], content.strip())
                 st.session_state["group_msgs"] = group_messages(group_id)
-                st.rerun()
-            except Exception as exc: st.error(f"Không gửi được tin nhắn. Kiểm tra Supabase Auth/RLS: {exc}")
-    else:
-        st.info("Cần cấu hình Supabase và chạy supabase_schema.sql. Tin nhắn nhóm chưa được bật cho đến khi có database.")
+            else:
+                with db() as con:
+                    con.execute("INSERT INTO local_group_messages(group_id,user_id,display_name,content,created_at) VALUES(?,?,?,?,?)", (group_id, uid, user["display_name"], content.strip(), datetime.now().isoformat(timespec="seconds")))
+                    rows = con.execute("SELECT group_id,user_id,display_name,content,created_at FROM local_group_messages WHERE group_id=? ORDER BY id DESC LIMIT 50", (group_id,)).fetchall()
+                st.session_state["group_msgs"] = [dict(r) for r in reversed(rows)]
+            st.rerun()
+        except Exception as exc:
+            st.warning(f"Không gửi được qua Supabase ({exc}); đã chuyển sang kho chat cục bộ trên máy chủ này.")
+            with db() as con:
+                con.execute("INSERT INTO local_group_messages(group_id,user_id,display_name,content,created_at) VALUES(?,?,?,?,?)", (group_id, uid, user["display_name"], content.strip(), datetime.now().isoformat(timespec="seconds")))
+                rows = con.execute("SELECT group_id,user_id,display_name,content,created_at FROM local_group_messages WHERE group_id=? ORDER BY id DESC LIMIT 50", (group_id,)).fetchall()
+            st.session_state["group_msgs"] = [dict(r) for r in reversed(rows)]
+    if not remote_group:
+        st.info("Đang dùng chế độ chat nhóm cục bộ trên máy chủ hiện tại. Để nhiều người dùng chia sẻ dữ liệu thật, cấu hình Supabase và chạy supabase_schema.sql.")
     st.divider()
     st.markdown("#### 📹 Gọi video")
     room = st.text_input("Tên phòng gọi", value=f"phucs-{group_id}")
@@ -786,7 +1015,6 @@ with pages[10]:
     email = st.text_input("Email nhận hóa đơn (tùy chọn)", key="billing_email")
     if st.button("💳 Thanh toán Plus", type="primary"):
         try:
-            from phucs_integrations import create_checkout_url
             checkout_url = create_checkout_url(uid, email.strip())
             st.link_button("Mở trang thanh toán bảo mật ↗", checkout_url, use_container_width=True)
         except Exception as exc: st.error(str(exc))
@@ -798,13 +1026,24 @@ with pages[10]:
         if not cloud_file: st.warning("Hãy chọn một tệp.")
         else:
             try:
-                from phucs_integrations import upload_supabase_file
                 with st.spinner("Đang tải tệp lên..."):
                     meta = upload_supabase_file(uid, cloud_file)
                 st.success(f"Đã tải lên: {meta['path']} ({meta['size']:,} byte)")
                 st.json(meta)
-            except Exception as exc: st.error(str(exc))
-    st.caption("Cần SUPABASE_URL, SUPABASE_ANON_KEY và bucket phucs-files. Cấu hình Storage policies trước khi triển khai công khai.")
+            except Exception as exc:
+                # Usable development fallback. Streamlit Cloud filesystem is ephemeral; use Supabase for durable cloud storage.
+                try:
+                    upload_dir = APP_DIR / "data" / "uploads" / uid
+                    upload_dir.mkdir(parents=True, exist_ok=True)
+                    safe_name = Path(cloud_file.name).name.replace(" ", "_")
+                    out_path = upload_dir / (datetime.now().strftime("%Y%m%d_%H%M%S_") + safe_name)
+                    out_path.write_bytes(cloud_file.getvalue())
+                    st.success(f"Đã lưu tệp tạm trên máy chủ: {out_path.name}")
+                    st.warning("Lưu cục bộ chỉ phù hợp thử nghiệm; trên Streamlit Cloud, tệp có thể mất khi máy chủ khởi động lại. Cấu hình Supabase Storage để lưu bền vững.")
+                    st.download_button("Tải lại tệp", data=out_path.read_bytes(), file_name=safe_name)
+                except Exception as local_exc:
+                    st.error(f"Tải lên thất bại: {exc}. Lưu cục bộ cũng thất bại: {local_exc}")
+    st.caption("Lưu trữ đám mây bền vững cần SUPABASE_URL, SUPABASE_ANON_KEY và bucket phucs-files cùng Storage policies.")
 
 st.divider()
 st.caption("P.H.U.C.S Alpha 2 · Một số tích hợp cần khóa API, cấu hình nhà cung cấp, chính sách bảo mật và kiểm thử trước khi mở cho công chúng.")
