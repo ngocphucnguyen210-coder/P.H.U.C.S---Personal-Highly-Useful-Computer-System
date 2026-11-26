@@ -1,11 +1,18 @@
+[README.md](https://github.com/user-attachments/files/35444256/README.md)
 # P.H.U.C.S AI — Alpha 2 (Streamlit + Groq)
 
 **P.H.U.C.S — Personal Highly Useful Computer System**  
 Slogan: **“Đồng hành cùng P.H.U.C.S, vững bước thành công”**
 
-Bộ mã nguồn này là một starter app có các phần hoạt động khi đã cấu hình dịch vụ phù hợp. Nó không thể tự tạo API key, tài khoản OAuth, dung lượng lưu trữ hoặc dịch vụ trả phí. Không đưa API key vào GitHub.
+Bộ mã nguồn này là một starter app có các phần hoạt động khi đã cấu hình dịch vụ phù hợp. Chat AI mặc định dùng `openai/gpt-oss-120b`; nếu Secrets còn chứa một số model Groq đã nghỉ, app sẽ tự chuẩn hóa sang model thay thế đã định nghĩa và có nút kiểm tra kết nối AI. Nó không thể tự tạo API key, tài khoản OAuth, dung lượng lưu trữ hoặc dịch vụ trả phí. Không đưa API key vào GitHub.
+
+## Giao diện pastel hồng P.H.U.C.S
+
+Bản này làm mới CSS theo phong cách hồng pastel: nền mộng mơ, thẻ bo tròn, nút gradient hồng, thanh điều hướng dạng viên thuốc và banner chào mừng. Các tab/chức năng, đăng nhập khách, lịch sử chat, học tập, ghi chú, biểu đồ, phòng thí nghiệm và tích hợp AI vẫn giữ trong `app.py`. Do Streamlit có bố cục riêng, đây là bản dựng gần sát tinh thần mockup, không phải bản sao pixel-perfect của ảnh thiết kế.
 
 ## 1. Chạy trên Streamlit Community Cloud
+
+Xem thêm hướng dẫn triển khai từng bước bằng tiếng Việt trong `DEPLOY_QUICKSTART_VI.md`.
 
 1. Giải nén ZIP.
 2. Đưa **toàn bộ nội dung** thư mục `phucs_ai_starter` lên thư mục gốc của repository GitHub. Giữ nguyên `assets/phucs_logo.png` và `.streamlit/config.toml`.
@@ -95,7 +102,8 @@ Giá 35.000 VNĐ/năm và mục tiêu 400–500 GB là cấu hình sản phẩm 
 
 ## 5. Kiểm thử và giới hạn quan trọng
 
-- Đã kiểm tra cú pháp Python của `app.py`, `phucs_integrations.py`, `api_server.py` khi đóng gói.
+- Đã kiểm tra cú pháp Python của `app.py`, `phucs_integrations.py`, `api_server.py` khi đóng gói và chạy các kiểm thử offline cho cấu hình model.
+- Chưa thể kiểm thử cuộc gọi AI thật trong môi trường đóng gói vì không sử dụng khóa API của người dùng; hãy chạy nút **Kiểm tra kết nối AI** sau khi đặt khóa riêng trong Secrets.
 - Không thể xác minh API thật nếu không có khóa/tài khoản của chủ dự án. Sau khi triển khai, mở **Manage app → Logs** để đọc traceback khi một dịch vụ gặp lỗi.
 - Không có AI nào đảm bảo trả lời đúng tuyệt đối mọi câu hỏi. Với bài học, đối chiếu sách/giáo viên/nguồn gốc; với y tế, pháp luật hoặc tài chính, dùng câu trả lời như thông tin tham khảo và hỏi chuyên gia khi cần.
 - Đăng nhập OAuth, thanh toán, storage và group chat phải được cấu hình bảo mật trước khi dùng cho người thật. SQLite trên Streamlit Cloud không phải cơ sở dữ liệu sản xuất bền vững.
