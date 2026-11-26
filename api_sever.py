@@ -2,6 +2,7 @@
 Example: uvicorn api_server:app --host 0.0.0.0 --port 8000
 """
 import os
+import re, hmac, hashlib, time
 from datetime import datetime, timezone
 import requests
 from fastapi import FastAPI, Request, HTTPException
@@ -69,3 +70,68 @@ async def stripe_webhook(request: Request):
         if not response.ok:
             raise HTTPException(status_code=502, detail='Could not update subscription status in Supabase')
     return {'received': True}
+
+
+@app.post('/sepay/webhook')
+async def sepay_webhook(request: Request):
+    """Verify SePay transfer events and grant one year of Plus for exactly 35,000 VND."""
+    raw = await request.body()
+    api_key = os.getenv('SEPAY_WEBHOOK_API_KEY', '').strip()
+    hmac_secret = os.getenv('SEPAY_WEBHOOK_HMAC_SECRET', '').strip()
+    auth = request.headers.get('authorization', '')
+    authenticated = bool(api_key and hmac.compare_digest(auth, f'Apikey {api_key}'))
+    if hmac_secret:
+        signature = request.headers.get('x-sepay-signature', '')
+        timestamp = request.headers.get('x-sepay-timestamp', '')
+        try:
+            ts = int(timestamp)
+            expected = 'sha256=' + hmac.new(hmac_secret.encode(), timestamp.encode() + b'.' + raw, hashlib.sha256).hexdigest()
+            authenticated = authenticated or (abs(int(time.time()) - ts) <= 300 and hmac.compare_digest(signature, expected))
+        except Exception:
+            pass
+    if not authenticated:
+        raise HTTPException(status_code=401, detail='Invalid SePay webhook authentication')
+
+    try:
+        data = await request.json()
+        transaction_id = int(data.get('id'))
+        amount = int(data.get('transferAmount') or 0)
+        transfer_type = str(data.get('transferType') or '').lower()
+        content = str(data.get('content') or data.get('description') or '')
+        match = re.search(r'PHUCS-([A-Za-z0-9_-]{4,100})', content, re.IGNORECASE)
+        if transfer_type != 'in':
+            return {'success': True, 'ignored': 'not_incoming'}
+        if amount != 35000:
+            return {'success': True, 'ignored': 'amount_mismatch'}
+        if not match:
+            return {'success': True, 'ignored': 'missing_payment_code'}
+        user_id = match.group(1)
+        paid_at_raw = data.get('transactionDate')
+        paid_at = None
+        if paid_at_raw:
+            try:
+                paid_at = datetime.strptime(paid_at_raw, '%Y-%m-%d %H:%M:%S').replace(tzinfo=timezone.utc).isoformat()
+            except Exception:
+                paid_at = None
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=f'Invalid SePay payload: {exc}')
+
+    supabase_url = os.getenv('SUPABASE_URL', '').rstrip('/')
+    service_key = os.getenv('SUPABASE_SERVICE_ROLE_KEY', '')
+    if not supabase_url or not service_key:
+        raise HTTPException(status_code=503, detail='Supabase server credentials are not configured')
+    payload = {
+        'p_transaction_id': transaction_id,
+        'p_user_id': user_id,
+        'p_amount_vnd': amount,
+        'p_transfer_content': content,
+        'p_reference_code': str(data.get('referenceCode') or ''),
+        'p_paid_at': paid_at,
+    }
+    response = requests.post(
+        f'{supabase_url}/rest/v1/rpc/process_phucs_bank_payment',
+        headers={'apikey': service_key, 'Authorization': f'Bearer {service_key}', 'Content-Type': 'application/json'},
+        json=payload, timeout=15)
+    if not response.ok:
+        raise HTTPException(status_code=502, detail='Could not record bank payment')
+    return {'success': True, 'activated': response.json() if response.content else None}
