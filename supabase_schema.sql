@@ -29,3 +29,52 @@ create table if not exists public.subscriptions (
 );
 alter table public.subscriptions enable row level security;
 -- No public policies are added: only trusted server-side service-role code should write subscription state.
+
+-- Idempotent SePay bank-transfer processing. Run this whole schema in Supabase SQL Editor.
+create table if not exists public.phucs_bank_payments (
+  sepay_transaction_id bigint primary key,
+  user_id text not null,
+  amount_vnd bigint not null,
+  transfer_content text not null,
+  reference_code text,
+  paid_at timestamptz,
+  created_at timestamptz not null default now()
+);
+alter table public.phucs_bank_payments enable row level security;
+
+create or replace function public.process_phucs_bank_payment(
+  p_transaction_id bigint,
+  p_user_id text,
+  p_amount_vnd bigint,
+  p_transfer_content text,
+  p_reference_code text,
+  p_paid_at timestamptz
+) returns boolean
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare inserted_count integer;
+begin
+  if p_amount_vnd <> 35000 then
+    raise exception 'Invalid payment amount';
+  end if;
+  insert into public.phucs_bank_payments(
+    sepay_transaction_id,user_id,amount_vnd,transfer_content,reference_code,paid_at
+  ) values (
+    p_transaction_id,p_user_id,p_amount_vnd,p_transfer_content,p_reference_code,p_paid_at
+  ) on conflict (sepay_transaction_id) do nothing;
+  get diagnostics inserted_count = row_count;
+  if inserted_count = 0 then
+    return false;
+  end if;
+  insert into public.subscriptions(user_id,status,current_period_end,updated_at)
+  values (p_user_id,'active',now() + interval '365 days',now())
+  on conflict (user_id) do update set
+    status='active',
+    current_period_end=greatest(coalesce(public.subscriptions.current_period_end,now()),now()) + interval '365 days',
+    updated_at=now();
+  return true;
+end;
+$$;
+revoke all on function public.process_phucs_bank_payment(bigint,text,bigint,text,text,timestamptz) from public, anon, authenticated;
