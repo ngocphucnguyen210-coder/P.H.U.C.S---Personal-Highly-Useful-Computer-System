@@ -38,19 +38,20 @@ def _setting_fallback(name, default=""):
 INTEGRATION_IMPORT_ERROR = None
 try:
     from phucs_integrations import (
-        setting, tavily_search, analyze_image, transcribe_audio, generate_image,
+        setting, ai_client, chat_completion, test_ai_connection, tavily_search, analyze_image, transcribe_audio, generate_image,
         replicate_create, supabase_client, create_checkout_url, upload_supabase_file,
         group_messages, send_group_message,
     )
 except Exception as _exc:
     INTEGRATION_IMPORT_ERROR = _exc
     setting = _setting_fallback
+    ai_client = chat_completion = test_ai_connection = _integration_unavailable
     tavily_search = analyze_image = transcribe_audio = generate_image = _integration_unavailable
     replicate_create = supabase_client = create_checkout_url = upload_supabase_file = _integration_unavailable
     group_messages = send_group_message = _integration_unavailable
 
 st.set_page_config(
-    page_title="P.H.U.C.S AI — Đồng hành cùng bạn",
+    page_title="P.H.U.C.S AI — Learn together",
     page_icon="🎓",
     layout="wide",
     initial_sidebar_state="expanded",
@@ -62,30 +63,196 @@ PALE = "#FFF4F8"
 DARK_PINK = "#A82F62"
 
 def inject_css():
+    """Refined visual system: preserve the original Streamlit layout and improve contrast."""
     st.markdown("""
     <style>
-    @import url('https://fonts.googleapis.com/css2?family=Be+Vietnam+Pro:wght@400;500;600;700;800&family=Nunito:wght@400;600;700;800;900&display=swap');
+    @import url('https://fonts.googleapis.com/css2?family=Be+Vietnam+Pro:wght@400;500;600;700;800&display=swap');
+    :root {
+      --phucs-rose: #C65A83;
+      --phucs-rose-deep: #8E365A;
+      --phucs-rose-soft: #F5DCE6;
+      --phucs-ink: #392631;
+      --phucs-muted: #806B76;
+      --phucs-paper: #FFFCFD;
+      --phucs-line: #EBD3DD;
+    }
     html, body, [class*="css"] { font-family: 'Be Vietnam Pro', sans-serif; }
-    .stApp { background: linear-gradient(135deg,#fff8fb 0%,#fff1f7 48%,#fff9fc 100%); }
-    [data-testid="stSidebar"] { background: linear-gradient(180deg,#ffe7f0 0%,#fff4f8 100%); border-right:1px solid #f5c8da; }
-    h1,h2,h3 { color:#8f2854; font-family:'Nunito','Be Vietnam Pro',sans-serif; }
-    .hero { padding:1.3rem 1.5rem; border:1px solid #f4c5d8; border-radius:24px;
-            background:linear-gradient(120deg,rgba(255,255,255,.95),rgba(255,228,239,.92));
-            box-shadow:0 12px 34px rgba(177,56,106,.09); }
-    .brand { font-family:'Nunito',sans-serif; font-weight:900; letter-spacing:.04em;
-             font-size:clamp(2rem,5vw,3.8rem); color:#d94f83; line-height:1.05; }
-    .slogan { color:#8f2854; font-weight:600; font-size:1.03rem; }
-    .small-muted { color:#8e6a7a; font-size:.9rem; }
-    div.stButton > button { border-radius:14px; border:1px solid #efb5cc; font-weight:700; }
-    div.stButton > button[kind="primary"] { background:#d94f83; color:white; border:0; }
-    [data-testid="stMetric"] { background:#fff; padding:1rem; border:1px solid #f4d0df; border-radius:18px; }
-    .stTabs [data-baseweb="tab-list"] { gap:8px; }
-    .stTabs [data-baseweb="tab"] { background:#ffe8f1; border-radius:12px 12px 0 0; padding:10px 16px; }
-    .stTabs [aria-selected="true"] { background:#d94f83 !important; color:white !important; }
+    .stApp {
+      color: var(--phucs-ink);
+      background:
+        radial-gradient(ellipse at 10% 0%, rgba(238,190,209,.25), transparent 34%),
+        radial-gradient(ellipse at 92% 12%, rgba(222,185,205,.20), transparent 30%),
+        #FBF7F9;
+    }
+    [data-testid="stHeader"] { background: rgba(251,247,249,.92); }
+    [data-testid="stSidebar"] {
+      background: linear-gradient(180deg,#F8EAF0 0%,#FBF6F8 42%,#F8F3F6 100%);
+      border-right: 1px solid var(--phucs-line);
+    }
+    [data-testid="stSidebar"] > div:first-child { padding-top: 1rem; }
+    [data-testid="stSidebar"] p,
+    [data-testid="stSidebar"] label,
+    [data-testid="stSidebar"] .stMarkdown { color: #493541 !important; }
+    [data-testid="stSidebar"] [data-testid="stImage"] img {
+      border-radius: 16px; border: 1px solid rgba(198,90,131,.14);
+    }
+    h1,h2,h3 { color: var(--phucs-rose-deep); font-weight: 750; letter-spacing: -.025em; }
+    p, li, label, [data-testid="stCaptionContainer"] { color: #493541; }
+    .welcome-hero, .hero {
+      position: relative; overflow: hidden;
+      border: 1px solid #E9C7D5; border-radius: 23px;
+      background: linear-gradient(112deg,rgba(255,255,255,.97),rgba(249,232,239,.94));
+      box-shadow: 0 8px 24px rgba(83,43,62,.055);
+    }
+    .welcome-hero { padding: 1.55rem 1.7rem; margin: .3rem 0 1rem; }
+    .hero { padding: 1.4rem 1.6rem; }
+    .welcome-hero:after {
+      content: ''; position: absolute; width: 260px; height: 260px;
+      right: -105px; top: -145px; border-radius: 50%;
+      border: 1px solid rgba(198,90,131,.12);
+      box-shadow: 0 0 0 22px rgba(198,90,131,.035),0 0 0 44px rgba(198,90,131,.025);
+      pointer-events: none;
+    }
+    .brand { color: var(--phucs-rose-deep); font-weight: 800; letter-spacing: -.02em; }
+    .slogan { color: #765365; font-weight: 600; }
+    .small-muted { color: var(--phucs-muted); font-size: .9rem; }
+    /* Stable, high-contrast controls: no transparent dark buttons or dark text on dark fills. */
+    div.stButton > button, .stLinkButton a {
+      background: #FFFDFE !important; color: #67364D !important;
+      border: 1px solid #DDB6C7 !important; border-radius: 12px !important;
+      font-weight: 650; min-height: 2.45rem;
+      box-shadow: 0 2px 7px rgba(64,35,49,.035);
+      transition: border-color .16s ease, background .16s ease, transform .16s ease;
+    }
+    div.stButton > button:hover, .stLinkButton a:hover {
+      background: #F8E8EF !important; color: #71334F !important;
+      border-color: #C77A9A !important; transform: translateY(-1px);
+    }
+    div.stButton > button[kind="primary"],
+    div.stButton > button[data-testid="baseButton-primary"] {
+      background: #963D62 !important; color: #FFFFFF !important;
+      border: 1px solid #963D62 !important;
+      box-shadow: 0 4px 12px rgba(120,47,79,.16);
+    }
+    div.stButton > button[kind="primary"]:hover,
+    div.stButton > button[data-testid="baseButton-primary"]:hover {
+      background: #7F3152 !important; color: #FFFFFF !important;
+    }
+    [data-testid="stMetric"], [data-testid="stExpander"],
+    [data-testid="stFileUploader"] section {
+      background: #FFFEFF !important; color: var(--phucs-ink) !important;
+      border: 1px solid var(--phucs-line) !important; border-radius: 15px;
+    }
+    [data-testid="stChatMessage"] {
+      background: #FFFFFF !important; color: #35242D !important;
+      border: 1px solid #E9D4DE !important; border-radius: 16px;
+      box-shadow: 0 3px 12px rgba(60,35,47,.035);
+    }
+    [data-testid="stChatMessage"] p,
+    [data-testid="stChatMessage"] li,
+    [data-testid="stChatMessage"] span { color: #35242D !important; }
+    [data-testid="stChatInput"] textarea,
+    [data-testid="stTextInput"] input,
+    [data-testid="stTextArea"] textarea {
+      background: #FFFFFF !important; color: #35242D !important;
+      -webkit-text-fill-color: #35242D !important;
+      border: 1px solid #D9B8C7 !important; border-radius: 12px !important;
+    }
+    [data-testid="stChatInput"] textarea::placeholder,
+    input::placeholder, textarea::placeholder { color: #8A7480 !important; opacity: 1 !important; }
+    [data-testid="stChatInput"] button {
+      background: #963D62 !important; color: #FFFFFF !important;
+      border: 1px solid #963D62 !important; border-radius: 11px !important;
+    }
+    /* BaseWeb selects and dropdown menus: explicitly set both surface and text colors. */
+    [data-baseweb="select"] > div {
+      background: #FFFFFF !important; color: #35242D !important;
+      border: 1px solid #D9B8C7 !important; border-radius: 11px !important;
+    }
+    [data-baseweb="select"] input,
+    [data-baseweb="select"] span,
+    [data-baseweb="select"] div { color: #35242D !important; }
+    [role="listbox"], [role="option"], [data-baseweb="popover"] {
+      background: #FFFFFF !important; color: #35242D !important;
+    }
+    [role="option"]:hover { background: #F7E8EF !important; }
+    .stTabs [data-baseweb="tab-list"] {
+      gap: 5px; padding: 5px; border: 1px solid var(--phucs-line);
+      border-radius: 14px; background: #F7EEF2; flex-wrap: wrap;
+    }
+    .stTabs [data-baseweb="tab"] {
+      background: transparent; border: 1px solid transparent;
+      border-radius: 10px; padding: 8px 12px; color: #684355 !important;
+      font-weight: 600;
+    }
+    .stTabs [aria-selected="true"] {
+      background: #963D62 !important; color: #FFFFFF !important;
+      border-color: #963D62 !important;
+    }
+    [data-testid="stAlert"] { border-radius: 13px; }
+    [data-testid="stAlert"] p, [data-testid="stAlert"] li { color: #35242D !important; }
+    [data-testid="stMarkdownContainer"] pre {
+      background: #F8F3F6 !important; border: 1px solid #E8D7DF;
+      border-radius: 12px;
+    }
+    [data-testid="stMarkdownContainer"] code { color: #873B5B; }
+    .katex, .katex-display { color: #35242D !important; }
+    hr { border-color: #E8D4DE !important; }
+    @media (max-width: 760px) {
+      .welcome-hero,.hero { padding: 1.1rem; border-radius: 17px; }
+      .stTabs [data-baseweb="tab"] { padding: 7px 9px; }
+    }
+    @media (prefers-reduced-motion: reduce) {
+      *,*::before,*::after { animation-duration:.01ms!important; transition-duration:.01ms!important; }
+    }
     </style>
     """, unsafe_allow_html=True)
 
 inject_css()
+
+# ---------- Browser text-to-speech ----------
+def render_answer_voice(text, language_code="vi"):
+    """Read an answer with the voices installed in the visitor's browser/device."""
+    import json as _json
+    safe_text = _json.dumps(str(text), ensure_ascii=False)
+    safe_lang = _json.dumps(str(language_code or "vi"), ensure_ascii=False)
+    html = f"""<div style='font-family:system-ui;color:#493541;background:#fff9fc;border:1px solid #ead3de;border-radius:12px;padding:10px 12px'>
+      <div style='display:flex;gap:8px;align-items:center;flex-wrap:wrap'>
+        <label for='phucs-voice' style='font-size:13px'>🔊 Giọng đọc</label>
+        <select id='phucs-voice' style='max-width:260px;padding:7px;border:1px solid #d9b8c7;border-radius:8px;background:white;color:#35242d'></select>
+        <button id='phucs-play' style='padding:7px 13px;border:0;border-radius:8px;background:#963d62;color:white;cursor:pointer'>▶ Đọc đáp án</button>
+        <button id='phucs-stop' style='padding:7px 13px;border:1px solid #d9b8c7;border-radius:8px;background:white;color:#67364d;cursor:pointer'>■ Dừng</button>
+      </div><small id='phucs-voice-note' style='display:block;margin-top:6px;color:#806b76'>Giọng đọc phụ thuộc các giọng đã cài trên trình duyệt/thiết bị.</small>
+    </div>
+    <script>
+    (() => {{
+      const text = {safe_text}; const lang = {safe_lang};
+      const sel = document.getElementById('phucs-voice');
+      const note = document.getElementById('phucs-voice-note');
+      const synth = window.speechSynthesis;
+      if (!synth || !window.SpeechSynthesisUtterance) {{ note.textContent='Trình duyệt này chưa hỗ trợ đọc văn bản.'; return; }}
+      let voices=[];
+      function loadVoices() {{
+        voices=synth.getVoices() || []; sel.innerHTML='';
+        const relevant=voices.filter(v => (v.lang||'').toLowerCase().startsWith(lang.toLowerCase()));
+        const choices=relevant.length ? relevant : voices;
+        choices.forEach((v,i)=>{{const o=document.createElement('option');o.value=String(i);o.textContent=v.name+' ('+v.lang+')';sel.appendChild(o);}});
+        if (!choices.length) note.textContent='Thiết bị chưa có giọng đọc. Hãy cài thêm giọng trong cài đặt hệ điều hành.';
+        else if (!relevant.length) note.textContent='Không tìm thấy giọng đúng ngôn ngữ; đang hiển thị các giọng có sẵn.';
+        sel.dataset.voiceList=JSON.stringify(choices.map(v=>voices.indexOf(v)));
+      }}
+      loadVoices(); if (synth.onvoiceschanged !== undefined) synth.onvoiceschanged=loadVoices;
+      document.getElementById('phucs-play').onclick=()=>{{
+        const u=new SpeechSynthesisUtterance(text); u.lang=lang;
+        const map=JSON.parse(sel.dataset.voiceList||'[]'); const idx=map[Number(sel.value)];
+        if (idx!==undefined && voices[idx]) {{u.voice=voices[idx];u.lang=voices[idx].lang||lang;}}
+        u.rate=0.96; u.pitch=1.0; synth.cancel(); synth.speak(u);
+      }};
+      document.getElementById('phucs-stop').onclick=()=>synth.cancel();
+    }})();
+    </script>"""
+    st.components.v1.html(html, height=92, scrolling=False)
+
 
 # ---------- Database ----------
 def db():
@@ -248,31 +415,84 @@ with st.sidebar:
     if LOGO_PATH.exists():
         st.image(str(LOGO_PATH), use_container_width=True)
     st.markdown("<div style='text-align:center' class='brand'>P.H.U.C.S</div>", unsafe_allow_html=True)
-    st.caption("Đồng hành cùng P.H.U.C.S, vững bước thành công")
+    st.caption(tr("Đồng hành cùng P.H.U.C.S, vững bước thành công"))
     st.divider()
-    avatar_file = st.file_uploader("🖼️ Ảnh đại diện (tùy chọn)", type=["png", "jpg", "jpeg", "webp"], key="user_avatar")
+    avatar_file = st.file_uploader(tr("🖼️ Ảnh đại diện (tùy chọn)"), type=["png", "jpg", "jpeg", "webp"], key="user_avatar")
     if avatar_file:
         st.image(avatar_file, width=88)
     st.markdown(f"### 👤 {user['display_name']}")
     st.caption(f"ID cá nhân: `{uid}`")
     st.caption(f"Tài khoản: {user['provider'].title()}")
-    if st.button("↪ Đăng xuất", use_container_width=True):
+    if st.button(tr("↪ Đăng xuất"), use_container_width=True):
         for key in ["user", "messages", "active_chat"]:
             st.session_state.pop(key, None)
         st.rerun()
 
     st.divider()
-    language = st.selectbox("🌐 Ngôn ngữ", [
-        "Tiếng Việt", "English", "한국어", "Français", "Deutsch", "日本語",
-        "Español", "Русский", "中文", "ไทย", "Português", "Italiano"
+    language_options = ["Tiếng Việt", "English", "한국어", "Français", "Deutsch", "日本語", "Español", "Русский", "中文", "ไทย", "Português", "Italiano"]
+    language = st.selectbox("🌐 Language / Ngôn ngữ", language_options, key="ui_language")
+    theme = st.selectbox(tr("🎨 Giao diện & Hình nền"), [
+        "Hồng mộng mơ (động)", "Dải ngân hà hồng (động)", "Sóng biển pastel (động)",
+        "Cực quang tím hồng (động)", "Bình minh đào (động)", "Mây trôi xanh hồng (động)",
+        "Hoa anh đào (tĩnh)", "Bầu trời xanh (tĩnh)", "Hoàng hôn tím (tĩnh)",
+        "Giấy kem tối giản (tĩnh)", "Dark mode hồng đêm"
     ])
-    theme = st.selectbox("🎨 Giao diện", ["Hồng mộng mơ", "Dải ngân hà hồng", "Sóng biển hồng", "Dark mode hồng đêm"])
+    # Interface translations are local/static and do not consume API tokens.
+    _LANG_CODE = {"Tiếng Việt":"vi", "English":"en", "한국어":"ko", "Français":"fr", "Deutsch":"de", "日本語":"ja", "Español":"es", "Русский":"ru", "中文":"zh", "ไทย":"th", "Português":"pt", "Italiano":"it"}
+    _UI_LANG = _LANG_CODE.get(language, "vi")
+    _I18N = {
+      "Xin chào, {name}!": {"en":"Hello, {name}!", "ko":"안녕하세요, {name}님!", "fr":"Bonjour, {name} !", "de":"Hallo, {name}!", "ja":"こんにちは、{name}さん！", "es":"¡Hola, {name}!", "ru":"Здравствуйте, {name}!", "zh":"你好，{name}！", "th":"สวัสดี {name}!", "pt":"Olá, {name}!", "it":"Ciao, {name}!"},
+      "Mình là P.H.U.C.S AI — luôn sẵn sàng hỗ trợ bạn học tập, khám phá và chinh phục mọi ước mơ!": {"en":"I'm P.H.U.C.S AI — ready to help you learn, explore, and reach your dreams!", "ko":"저는 P.H.U.C.S AI입니다. 학습과 탐구, 꿈의 실현을 도와드릴게요!", "fr":"Je suis P.H.U.C.S AI, prêt à vous aider à apprendre, explorer et réaliser vos rêves !", "de":"Ich bin P.H.U.C.S AI und helfe dir beim Lernen, Entdecken und Erreichen deiner Ziele!", "ja":"P.H.U.C.S AIです。学習や探究、夢の実現をお手伝いします！", "es":"Soy P.H.U.C.S AI: ¡te ayudo a aprender, explorar y alcanzar tus sueños!", "ru":"Я P.H.U.C.S AI — помогу учиться, исследовать и достигать мечты!", "zh":"我是 P.H.U.C.S AI，随时帮助你学习、探索并实现梦想！", "th":"ฉันคือ P.H.U.C.S AI พร้อมช่วยให้คุณเรียนรู้ สำรวจ และไปถึงความฝัน!", "pt":"Sou o P.H.U.C.S AI — pronto para ajudar você a aprender, explorar e realizar seus sonhos!", "it":"Sono P.H.U.C.S AI, pronto ad aiutarti a imparare, esplorare e realizzare i tuoi sogni!"},
+      "✦ Học tập thông minh": {"en":"✦ Smart learning", "ko":"✦ 스마트 학습", "fr":"✦ Apprentissage intelligent", "de":"✦ Intelligentes Lernen", "ja":"✦ スマート学習", "es":"✦ Aprendizaje inteligente", "ru":"✦ Умное обучение", "zh":"✦ 智能学习", "th":"✦ เรียนรู้อย่างชาญฉลาด", "pt":"✦ Aprendizagem inteligente", "it":"✦ Apprendimento intelligente"},
+      "🔎 Tìm kiếm kiến thức": {"en":"🔎 Explore knowledge", "ko":"🔎 지식 탐색", "fr":"🔎 Explorer les connaissances", "de":"🔎 Wissen entdecken", "ja":"🔎 知識を探す", "es":"🔎 Explorar conocimientos", "ru":"🔎 Поиск знаний", "zh":"🔎 探索知识", "th":"🔎 ค้นหาความรู้", "pt":"🔎 Explorar conhecimentos", "it":"🔎 Esplora le conoscenze"},
+      "🪄 Sáng tạo nội dung": {"en":"🪄 Create content", "ko":"🪄 콘텐츠 만들기", "fr":"🪄 Créer du contenu", "de":"🪄 Inhalte erstellen", "ja":"🪄 コンテンツ作成", "es":"🪄 Crear contenido", "ru":"🪄 Создание контента", "zh":"🪄 创作内容", "th":"🪄 สร้างเนื้อหา", "pt":"🪄 Criar conteúdo", "it":"🪄 Crea contenuti"},
+      "♡ Đồng hành 24/7": {"en":"♡ Here for you 24/7", "ko":"♡ 24시간 함께", "fr":"♡ À vos côtés 24 h/24", "de":"♡ Rund um die Uhr für dich da", "ja":"♡ いつでもサポート", "es":"♡ Contigo 24/7", "ru":"♡ Рядом 24/7", "zh":"♡ 全天候陪伴", "th":"♡ อยู่เคียงข้าง 24/7", "pt":"♡ Com você 24/7", "it":"♡ Con te 24/7"},
+      "💬 Cơ bản": {"en":"💬 Chat", "ko":"💬 채팅", "fr":"💬 Discussion", "de":"💬 Chat", "ja":"💬 チャット", "es":"💬 Chat", "ru":"💬 Чат", "zh":"💬 聊天", "th":"💬 แชต", "pt":"💬 Conversa", "it":"💬 Chat"},
+      "⏱️ Đồng hồ học": {"en":"⏱️ Study timer", "ko":"⏱️ 학습 타이머", "fr":"⏱️ Minuteur d’étude", "de":"⏱️ Lerntimer", "ja":"⏱️ 学習タイマー", "es":"⏱️ Temporizador de estudio", "ru":"⏱️ Учебный таймер", "zh":"⏱️ 学习计时器", "th":"⏱️ ตัวจับเวลาเรียน", "pt":"⏱️ Temporizador de estudo", "it":"⏱️ Timer di studio"},
+      "📅 Lịch & Sự kiện": {"en":"📅 Calendar & Events", "ko":"📅 일정 및 이벤트", "fr":"📅 Calendrier et événements", "de":"📅 Kalender & Termine", "ja":"📅 カレンダーと予定", "es":"📅 Calendario y eventos", "ru":"📅 Календарь и события", "zh":"📅 日历与活动", "th":"📅 ปฏิทินและกิจกรรม", "pt":"📅 Calendário e eventos", "it":"📅 Calendario ed eventi"},
+      "✅ To-do List": {"en":"✅ To-do List", "ko":"✅ 할 일 목록", "fr":"✅ Liste de tâches", "de":"✅ Aufgabenliste", "ja":"✅ To-doリスト", "es":"✅ Lista de tareas", "ru":"✅ Список задач", "zh":"✅ 待办事项", "th":"✅ รายการสิ่งที่ต้องทำ", "pt":"✅ Lista de tarefas", "it":"✅ Lista delle cose da fare"},
+      "📝 Note & Studio": {"en":"📝 Notes & Studio", "ko":"📝 노트 및 스튜디오", "fr":"📝 Notes et studio", "de":"📝 Notizen & Studio", "ja":"📝 ノートとスタジオ", "es":"📝 Notas y estudio", "ru":"📝 Заметки и студия", "zh":"📝 笔记与工作室", "th":"📝 โน้ตและสตูดิโอ", "pt":"📝 Notas e estúdio", "it":"📝 Note e studio"},
+      "📊 Biểu đồ": {"en":"📊 Charts", "ko":"📊 차트", "fr":"📊 Graphiques", "de":"📊 Diagramme", "ja":"📊 グラフ", "es":"📊 Gráficos", "ru":"📊 Диаграммы", "zh":"📊 图表", "th":"📊 แผนภูมิ", "pt":"📊 Gráficos", "it":"📊 Grafici"},
+      "🎮 Giải trí": {"en":"🎮 Entertainment", "ko":"🎮 엔터테인먼트", "fr":"🎮 Divertissement", "de":"🎮 Unterhaltung", "ja":"🎮 エンタメ", "es":"🎮 Entretenimiento", "ru":"🎮 Развлечения", "zh":"🎮 娱乐", "th":"🎮 ความบันเทิง", "pt":"🎮 Entretenimento", "it":"🎮 Intrattenimento"},
+      "🧪 Phòng thí nghiệm": {"en":"🧪 Lab", "ko":"🧪 실험실", "fr":"🧪 Laboratoire", "de":"🧪 Labor", "ja":"🧪 ラボ", "es":"🧪 Laboratorio", "ru":"🧪 Лаборатория", "zh":"🧪 实验室", "th":"🧪 ห้องทดลอง", "pt":"🧪 Laboratório", "it":"🧪 Laboratorio"},
+      "🌐 Web & Media AI": {"en":"🌐 Web & AI Media", "ko":"🌐 웹 및 AI 미디어", "fr":"🌐 Web et médias IA", "de":"🌐 Web & KI-Medien", "ja":"🌐 Web・AIメディア", "es":"🌐 Web y medios de IA", "ru":"🌐 Веб и ИИ-медиа", "zh":"🌐 网页与 AI 媒体", "th":"🌐 เว็บและสื่อ AI", "pt":"🌐 Web e mídia de IA", "it":"🌐 Web e media IA"},
+      "👥 Nhóm & Gọi": {"en":"👥 Groups & Calls", "ko":"👥 그룹 및 통화", "fr":"👥 Groupes et appels", "de":"👥 Gruppen & Anrufe", "ja":"👥 グループと通話", "es":"👥 Grupos y llamadas", "ru":"👥 Группы и звонки", "zh":"👥 群组与通话", "th":"👥 กลุ่มและการโทร", "pt":"👥 Grupos e chamadas", "it":"👥 Gruppi e chiamate"},
+      "☁️ Plus & Cloud": {"en":"☁️ Plus & Cloud", "ko":"☁️ Plus 및 클라우드", "fr":"☁️ Plus et cloud", "de":"☁️ Plus & Cloud", "ja":"☁️ Plusとクラウド", "es":"☁️ Plus y nube", "ru":"☁️ Plus и облако", "zh":"☁️ Plus 与云端", "th":"☁️ Plus และคลาวด์", "pt":"☁️ Plus e nuvem", "it":"☁️ Plus e cloud"},
+      "Hộp thư P.H.U.C.S": {"en":"P.H.U.C.S Inbox", "ko":"P.H.U.C.S 받은편지함", "fr":"Boîte de réception P.H.U.C.S", "de":"P.H.U.C.S Postfach", "ja":"P.H.U.C.S 受信箱", "es":"Bandeja de P.H.U.C.S", "ru":"Почта P.H.U.C.S", "zh":"P.H.U.C.S 收件箱", "th":"กล่องข้อความ P.H.U.C.S", "pt":"Caixa de entrada P.H.U.C.S", "it":"Posta in arrivo P.H.U.C.S"},
+      "Một góc nhỏ xinh để hỏi bài, tâm sự và cùng nhau học tốt hơn ✨": {"en":"A cozy little space to ask questions, share thoughts, and learn together ✨", "ko":"질문하고 이야기하며 함께 성장하는 아늑한 공간 ✨", "fr":"Un petit espace chaleureux pour poser des questions et apprendre ensemble ✨", "de":"Ein gemütlicher Ort für Fragen, Austausch und gemeinsames Lernen ✨", "ja":"質問やおしゃべりをしながら、一緒に学ぶ小さな空間 ✨", "es":"Un rincón acogedor para preguntar, compartir y aprender juntos ✨", "ru":"Уютное место, чтобы задавать вопросы и учиться вместе ✨", "zh":"一个可以提问、分享心情、一起学习的小天地 ✨", "th":"พื้นที่น่ารักสำหรับถามคำถาม พูดคุย และเรียนรู้ไปด้วยกัน ✨", "pt":"Um cantinho acolhedor para perguntar, conversar e aprender juntos ✨", "it":"Un piccolo spazio accogliente per fare domande e imparare insieme ✨"},
+      "● AI đồng hành": {"en":"● AI companion", "ko":"● AI 학습 파트너", "fr":"● Compagnon IA", "de":"● KI-Begleiter", "ja":"● AIパートナー", "es":"● Compañero de IA", "ru":"● ИИ-помощник", "zh":"● AI 学习伙伴", "th":"● ผู้ช่วย AI", "pt":"● Companheiro de IA", "it":"● Compagno IA"},
+      "💗 Hỏi về Toán, Văn, Anh, Lý, Hóa, Sinh, Sử, Địa, ngoại ngữ, kỹ năng và kiến thức đời sống.": {"en":"💗 Ask about math, literature, English, sciences, languages, skills, and everyday knowledge.", "ko":"💗 수학, 문학, 영어, 과학, 외국어, 기술 및 생활 지식을 질문하세요.", "fr":"💗 Posez des questions sur les maths, la littérature, les sciences, les langues et la vie quotidienne.", "de":"💗 Fragen zu Mathe, Literatur, Sprachen, Naturwissenschaften und Alltagswissen.", "ja":"💗 数学、文学、英語、理科、外国語、スキル、日常知識について質問できます。", "es":"💗 Pregunta sobre matemáticas, literatura, ciencias, idiomas y conocimientos cotidianos.", "ru":"💗 Спрашивайте о математике, литературе, науках, языках и повседневных знаниях.", "zh":"💗 可询问数学、文学、英语、科学、外语、技能和生活知识。", "th":"💗 ถามเรื่องคณิตศาสตร์ วรรณคดี วิทยาศาสตร์ ภาษา และความรู้ในชีวิตประจำวัน", "pt":"💗 Pergunte sobre matemática, literatura, ciências, idiomas e conhecimentos do dia a dia.", "it":"💗 Chiedi di matematica, letteratura, scienze, lingue e conoscenze quotidiane."},
+      "📷 Đính kèm ảnh bài tập (tùy chọn)": {"en":"📷 Attach exercise image (optional)", "ko":"📷 문제 이미지 첨부 (선택)", "fr":"📷 Joindre une image d’exercice (facultatif)", "de":"📷 Aufgabenbild anhängen (optional)", "ja":"📷 問題の画像を添付（任意）", "es":"📷 Adjuntar imagen del ejercicio (opcional)", "ru":"📷 Прикрепить изображение задания (необязательно)", "zh":"📷 附加题目图片（可选）", "th":"📷 แนบรูปโจทย์ (ไม่บังคับ)", "pt":"📷 Anexar imagem do exercício (opcional)", "it":"📷 Allega immagine dell’esercizio (facoltativo)"},
+      "🌐 Tra cứu Internet và đính kèm nguồn khi trả lời": {"en":"🌐 Search the web and cite sources in answers", "ko":"🌐 웹 검색 및 답변에 출처 첨부", "fr":"🌐 Rechercher sur le Web et citer les sources", "de":"🌐 Im Web suchen und Quellen angeben", "ja":"🌐 Web検索して回答に出典を付ける", "es":"🌐 Buscar en Internet e incluir fuentes", "ru":"🌐 Искать в Интернете и указывать источники", "zh":"🌐 搜索网络并在回答中附上来源", "th":"🌐 ค้นหาเว็บและแนบแหล่งอ้างอิง", "pt":"🌐 Pesquisar na Web e citar fontes", "it":"🌐 Cerca sul Web e cita le fonti"},
+      "Nhập câu hỏi hoặc bài tập bạn muốn giải...": {"en":"Enter your question or exercise...", "ko":"질문이나 문제를 입력하세요...", "fr":"Saisissez votre question ou exercice...", "de":"Gib deine Frage oder Aufgabe ein...", "ja":"質問や問題を入力してください...", "es":"Escribe tu pregunta o ejercicio...", "ru":"Введите вопрос или задачу...", "zh":"输入你的问题或练习题...", "th":"พิมพ์คำถามหรือโจทย์ที่ต้องการให้ช่วย...", "pt":"Digite sua pergunta ou exercício...", "it":"Inserisci la domanda o l’esercizio..."},
+      "↪ Đăng xuất": {"en":"↪ Sign out", "ko":"↪ 로그아웃", "fr":"↪ Déconnexion", "de":"↪ Abmelden", "ja":"↪ ログアウト", "es":"↪ Cerrar sesión", "ru":"↪ Выйти", "zh":"↪ 退出登录", "th":"↪ ออกจากระบบ", "pt":"↪ Sair", "it":"↪ Esci"},
+      "🖼️ Ảnh đại diện (tùy chọn)": {"en":"🖼️ Profile picture (optional)", "ko":"🖼️ 프로필 사진 (선택)", "fr":"🖼️ Photo de profil (facultatif)", "de":"🖼️ Profilbild (optional)", "ja":"🖼️ プロフィール画像（任意）", "es":"🖼️ Foto de perfil (opcional)", "ru":"🖼️ Фото профиля (необязательно)", "zh":"🖼️ 头像（可选）", "th":"🖼️ รูปโปรไฟล์ (ไม่บังคับ)", "pt":"🖼️ Foto de perfil (opcional)", "it":"🖼️ Immagine del profilo (facoltativa)"},
+      "🎨 Giao diện & Hình nền": {"en":"🎨 Theme & Background", "ko":"🎨 테마 및 배경", "fr":"🎨 Thème et arrière-plan", "de":"🎨 Design & Hintergrund", "ja":"🎨 テーマと背景", "es":"🎨 Tema y fondo", "ru":"🎨 Тема и фон", "zh":"🎨 主题与背景", "th":"🎨 ธีมและพื้นหลัง", "pt":"🎨 Tema e plano de fundo", "it":"🎨 Tema e sfondo"},
+      "Tải hình nền riêng": {"en":"Upload custom background", "ko":"사용자 지정 배경 업로드", "fr":"Téléverser un arrière-plan personnalisé", "de":"Eigenen Hintergrund hochladen", "ja":"カスタム背景をアップロード", "es":"Subir fondo personalizado", "ru":"Загрузить свой фон", "zh":"上传自定义背景", "th":"อัปโหลดพื้นหลังที่กำหนดเอง", "pt":"Enviar fundo personalizado", "it":"Carica uno sfondo personalizzato"},
+    }
+    def tr(text):
+        return _I18N.get(text, {}).get(_UI_LANG, text)
     st.session_state.theme = theme
     if theme == "Dark mode hồng đêm":
-        st.markdown("""<style>.stApp{background:linear-gradient(135deg,#211725,#342033)!important;color:#fff}
-        h1,h2,h3,p,label{color:#ffe5f0!important} [data-testid="stSidebar"]{background:#281b2b!important}</style>""",
-                    unsafe_allow_html=True)
-    bg = st.file_uploader("Tải hình nền riêng", type=["png", "jpg", "jpeg", "webp"], key="bg_upload")
+        st.markdown("""<style>
+        [data-testid="stAppViewContainer"], .stApp {background:linear-gradient(135deg,#171321,#2b2036 55%,#241a2b)!important;color:#f8edf7!important}
+        [data-testid="stSidebar"] {background:linear-gradient(180deg,#241b2d,#302238)!important}
+        h1,h2,h3,h4,p,label,span,li,.stMarkdown {color:inherit}
+        [data-testid="stChatMessage"] {background:#34263d!important;border:1px solid #62445f!important;color:#fff5fb!important}
+        [data-testid="stChatMessage"] p,[data-testid="stChatMessage"] li {color:#fff5fb!important}
+        [data-testid="stChatInput"] textarea {background:#241b2d!important;color:#fff!important;border:1px solid #b66c9b!important}
+        [data-testid="stExpander"],[data-testid="stMetric"] {background:#302238!important;color:#fff!important;border-color:#62445f!important}
+        [data-testid="stTextInput"] input,[data-testid="stNumberInput"] input,[data-testid="stTextArea"] textarea,[data-testid="stDateInput"] input,[data-testid="stTimeInput"] input,[data-testid="stChatInput"] textarea {background:#211927!important;color:#fff7fc!important;-webkit-text-fill-color:#fff7fc!important;border-color:#b66c9b!important}
+        [data-baseweb="select"] > div,[data-baseweb="popover"] [role="listbox"],[data-baseweb="menu"] {background:#302238!important;color:#fff7fc!important}
+        [data-baseweb="popover"] *,[role="option"],[role="listbox"] * {color:#fff7fc!important}
+        [data-testid="stChatMessage"]:has([data-testid="chatAvatarIcon-assistant"]) {background:#302238!important;color:#fff7fc!important}
+        [data-testid="stChatMessage"]:has([data-testid="chatAvatarIcon-user"]) {background:#57304b!important;color:#fff7fc!important}
+        [data-testid="stChatMessage"] p,[data-testid="stChatMessage"] li,[data-testid="stChatMessage"] code {color:#fff7fc!important}
+        [data-testid="stAppViewContainer"] p,[data-testid="stAppViewContainer"] li,[data-testid="stAppViewContainer"] label,[data-testid="stAppViewContainer"] .stMarkdown,[data-testid="stAppViewContainer"] [data-testid="stCaptionContainer"] {color:#f8edf7!important}
+        [data-testid="stMarkdownContainer"] pre {background:#211927!important;border-color:#62445f!important}
+        [data-testid="stMarkdownContainer"] code {color:#ffd4ea!important}
+        </style>""", unsafe_allow_html=True)
+    bg = st.file_uploader(tr("Tải hình nền riêng"), type=["png", "jpg", "jpeg", "webp"], key="bg_upload")
     if bg:
         st.image(bg, caption="Xem trước hình nền", use_container_width=True)
         if len(bg.getvalue()) <= 5 * 1024 * 1024:
@@ -287,13 +507,21 @@ with st.sidebar:
         else:
             st.warning("Ảnh nền vượt 5 MB. Hãy nén ảnh nhỏ hơn để áp dụng làm nền.")
     else:
-        # Animated pastel presets; all CSS-only, no external image dependency.
-        if theme == "Dải ngân hà hồng":
-            st.markdown("<style>@keyframes galaxyMove{0%{background-position:0% 50%}100%{background-position:100% 50%}} [data-testid='stAppViewContainer']{background:radial-gradient(circle at 20% 30%,#ffd6ee 0,transparent 28%),radial-gradient(circle at 80% 20%,#d9c7ff 0,transparent 32%),linear-gradient(120deg,#fff0f8,#eadfff,#ffddeb)!important;background-size:220% 220%!important;animation:galaxyMove 18s ease infinite}</style>", unsafe_allow_html=True)
-        elif theme == "Sóng biển hồng":
-            st.markdown("<style>@keyframes waveMove{0%{background-position:0 0}100%{background-position:800px 0}} [data-testid='stAppViewContainer']{background:repeating-radial-gradient(ellipse at 50% 120%,rgba(255,255,255,.5) 0 16px,transparent 18px 42px),linear-gradient(135deg,#ffe5f1,#e4f6ff,#ffd6e9)!important;background-size:auto,240% 240%!important;animation:waveMove 24s linear infinite}</style>", unsafe_allow_html=True)
-        elif theme == "Hồng mộng mơ":
-            st.markdown("<style>@keyframes dreamMove{0%{background-position:0% 40%}50%{background-position:100% 60%}100%{background-position:0% 40%}} [data-testid='stAppViewContainer']{background:linear-gradient(120deg,#fff8fc,#ffe4ef,#f7e7ff,#fff1f7)!important;background-size:300% 300%!important;animation:dreamMove 22s ease infinite}</style>", unsafe_allow_html=True)
+        # Presets are CSS-only, so they work on Streamlit Cloud without external assets.
+        presets = {
+            "Hồng mộng mơ (động)": "@keyframes phucsDream{0%{background-position:0% 40%}50%{background-position:100% 60%}100%{background-position:0% 40%}} [data-testid='stAppViewContainer']{background:linear-gradient(120deg,#fff8fc,#ffe4ef,#f4e7ff,#fff1f7)!important;background-size:300% 300%!important;animation:phucsDream 22s ease infinite}",
+            "Dải ngân hà hồng (động)": "@keyframes phucsGalaxy{0%{background-position:0% 50%}100%{background-position:100% 50%}} [data-testid='stAppViewContainer']{background:radial-gradient(circle at 20% 30%,#ffd6ee 0,transparent 28%),radial-gradient(circle at 80% 20%,#cfc4ff 0,transparent 32%),linear-gradient(120deg,#fff0f8,#e4d8ff,#ffddeb)!important;background-size:220% 220%!important;animation:phucsGalaxy 18s ease infinite}",
+            "Sóng biển pastel (động)": "@keyframes phucsWave{0%{background-position:0% 50%}100%{background-position:100% 50%}} [data-testid='stAppViewContainer']{background:repeating-radial-gradient(ellipse at 50% 120%,rgba(255,255,255,.42) 0 16px,transparent 18px 42px),linear-gradient(135deg,#ffe5f1,#dff5ff,#ffd6e9)!important;background-size:auto,240% 240%!important;animation:phucsWave 24s linear infinite}",
+            "Cực quang tím hồng (động)": "@keyframes phucsAurora{0%{background-position:0% 50%}50%{background-position:100% 50%}100%{background-position:0% 50%}} [data-testid='stAppViewContainer']{background:radial-gradient(ellipse at 15% 15%,#e8c7ff 0,transparent 38%),radial-gradient(ellipse at 85% 30%,#ffc9e8 0,transparent 35%),linear-gradient(125deg,#f8efff,#dce8ff,#ffe7f3)!important;background-size:220% 220%!important;animation:phucsAurora 20s ease infinite}",
+            "Bình minh đào (động)": "@keyframes phucsSunrise{0%{background-position:0% 50%}50%{background-position:100% 50%}100%{background-position:0% 50%}} [data-testid='stAppViewContainer']{background:linear-gradient(125deg,#fff1dc,#ffd8d2,#ffe8f4,#fff4dd)!important;background-size:300% 300%!important;animation:phucsSunrise 25s ease infinite}",
+            "Mây trôi xanh hồng (động)": "@keyframes phucsClouds{0%{background-position:0% 0%}100%{background-position:500px 0%}} [data-testid='stAppViewContainer']{background:radial-gradient(ellipse at 20% 20%,#fff 0 7%,transparent 30%),radial-gradient(ellipse at 70% 35%,#fff 0 8%,transparent 32%),linear-gradient(135deg,#dff5ff,#f7e8ff,#ffe7f2)!important;background-size:650px 500px,800px 600px,200% 200%!important;animation:phucsClouds 36s linear infinite}",
+            "Hoa anh đào (tĩnh)": "[data-testid='stAppViewContainer']{background:radial-gradient(circle at 12% 18%,#ffd3e5 0,transparent 25%),radial-gradient(circle at 90% 70%,#f7d9ff 0,transparent 30%),linear-gradient(135deg,#fff8fc,#ffedf5,#fffafd)!important}",
+            "Bầu trời xanh (tĩnh)": "[data-testid='stAppViewContainer']{background:radial-gradient(ellipse at 20% 15%,#fff 0 5%,transparent 28%),linear-gradient(155deg,#e0f5ff,#f4f0ff 55%,#ffeaf4)!important}",
+            "Hoàng hôn tím (tĩnh)": "[data-testid='stAppViewContainer']{background:linear-gradient(145deg,#fbe4ff,#e7ddff 48%,#ffdfe8)!important}",
+            "Giấy kem tối giản (tĩnh)": "[data-testid='stAppViewContainer']{background:linear-gradient(135deg,#fffaf0,#f8f1e8,#fff7fb)!important}"
+        }
+        if theme in presets:
+            st.markdown(f"<style>{presets[theme]}</style>", unsafe_allow_html=True)
     st.divider()
     with st.expander("⚙️ Cài đặt"):
         st.markdown("**P.H.U.C.S AI Plus**")
@@ -311,14 +539,10 @@ with st.sidebar:
             st.selectbox("Tắt thông báo trong", ["Không", "1 giờ", "2 giờ", "3 giờ", "4 giờ", "6 giờ", "12 giờ"])
         st.divider()
         st.markdown("**🗣️ Giọng đọc**")
-        st.selectbox("Giọng P.H.U.C.S", [
-            "Nữ trung — miền Bắc", "Nữ cao — miền Bắc", "Nữ trầm — miền Nam",
-            "Nam trung — miền Bắc", "Nam trầm — miền Nam", "Nam cao — miền Trung"
-        ])
-        st.caption("Tùy chọn giọng đọc cần tích hợp dịch vụ Text-to-Speech.")
+        st.caption("Mỗi câu trả lời có nút Đọc đáp án. Chọn giọng thật đang có trên trình duyệt/thiết bị; danh sách tự lọc theo ngôn ngữ giao diện.")
         st.divider()
         st.markdown("**ⓘ Giới thiệu**")
-        st.write("P.H.U.C.S Alpha 2")
+        st.write("P.H.U.C.S Alpha 1")
         st.caption("Bản khởi đầu. Các bản sau sẽ bổ sung đăng nhập, đồng bộ và công cụ nâng cao.")
 
     st.divider()
@@ -357,25 +581,62 @@ with st.sidebar:
                 st.rerun()
 
 # ---------- Header ----------
-st.markdown("""
-<div class="hero">
-  <div style="display:flex;align-items:center;gap:14px;flex-wrap:wrap">
-    <div><div class="brand" style="font-size:2.3rem">P.H.U.C.S AI</div>
-    <div class="slogan">Đồng hành cùng P.H.U.C.S, vững bước thành công</div>
-    <div class="small-muted">Personal Highly Useful Computer System · Alpha 1</div></div>
+st.markdown(f"""
+<div class="welcome-hero">
+  <div style="display:flex;align-items:center;gap:18px;position:relative;z-index:1;flex-wrap:wrap">
+    <div style="font-size:2.5rem;line-height:1">👋</div>
+    <div style="flex:1;min-width:230px">
+      <div style="font-family:Nunito,sans-serif;font-weight:900;font-size:clamp(1.7rem,3vw,2.45rem);color:#a82f62;line-height:1.2">{tr('Xin chào, {name}!').format(name=user['display_name'])}</div>
+      <div style="font-size:1.02rem;color:#7b3155;margin-top:.55rem">{tr("Mình là P.H.U.C.S AI — luôn sẵn sàng hỗ trợ bạn học tập, khám phá và chinh phục mọi ước mơ!")}</div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:1rem">
+        <span style="background:#fff;border:1px solid #f5c6dc;border-radius:999px;padding:8px 13px;color:#a82f62;font-size:.86rem">{tr("✦ Học tập thông minh")}</span>
+        <span style="background:#fff;border:1px solid #f5c6dc;border-radius:999px;padding:8px 13px;color:#a82f62;font-size:.86rem">{tr("🔎 Tìm kiếm kiến thức")}</span>
+        <span style="background:#fff;border:1px solid #f5c6dc;border-radius:999px;padding:8px 13px;color:#a82f62;font-size:.86rem">{tr("🪄 Sáng tạo nội dung")}</span>
+        <span style="background:#fff;border:1px solid #f5c6dc;border-radius:999px;padding:8px 13px;color:#a82f62;font-size:.86rem">{tr("♡ Đồng hành 24/7")}</span>
+      </div>
+    </div>
+    <div style="text-align:center;min-width:125px;padding:10px 14px;background:rgba(255,255,255,.65);border:1px solid #f8d5e5;border-radius:22px">
+      <div style="font-size:2.3rem">🎓</div><div style="font-family:Nunito,sans-serif;font-weight:900;font-size:1.25rem;color:#df2f8b">P.H.U.C.S AI</div><div style="font-size:.78rem;color:#986d83">Alpha 2 · Learning buddy</div>
+    </div>
   </div>
 </div>
 """, unsafe_allow_html=True)
-st.write("")
 
-pages = st.tabs(["💬 Cơ bản", "⏱️ Đồng hồ học", "📅 Lịch & Sự kiện", "✅ To-do List",
-                 "📝 Note & Studio", "📊 Biểu đồ", "🎮 Giải trí", "🧪 Phòng thí nghiệm",
-                 "🌐 Web & Media AI", "👥 Nhóm & Gọi", "☁️ Plus & Cloud"])
+pages = st.tabs([tr("💬 Cơ bản"), tr("⏱️ Đồng hồ học"), tr("📅 Lịch & Sự kiện"), tr("✅ To-do List"),
+                 tr("📝 Note & Studio"), tr("📊 Biểu đồ"), tr("🎮 Giải trí"), tr("🧪 Phòng thí nghiệm"),
+                 tr("🌐 Web & Media AI"), tr("👥 Nhóm & Gọi"), tr("☁️ Plus & Cloud")])
+
+def _friendly_ai_error(exc):
+    """Turn common provider failures into actionable Vietnamese diagnostics."""
+    status = getattr(exc, "status_code", None)
+    detail = str(exc)
+    lowered = detail.lower()
+    if status == 401 or "invalid_api_key" in lowered or "unauthorized" in lowered:
+        return "API key không hợp lệ hoặc đã bị thu hồi. Tạo khóa mới tại https://console.groq.com/keys và cập nhật Streamlit Secrets. Không gửi khóa vào chat/GitHub."
+    if status == 429 or "rate_limit" in lowered or "quota" in lowered:
+        return "Groq đang giới hạn tốc độ hoặc tài khoản đã hết hạn mức. Chờ rồi thử lại, hoặc kiểm tra Limits/Usage trong Groq Console."
+    if status == 404 or "model_not_found" in lowered or "model not found" in lowered or "decommissioned" in lowered:
+        return 'Model đã bị ngừng hỗ trợ hoặc không khả dụng cho tài khoản. Đặt GROQ_MODEL = "openai/gpt-oss-120b" trong Streamlit Secrets rồi khởi động lại app. Chi tiết: ' + detail[:500]
+    if status in (400, 403):
+        return f"Groq từ chối yêu cầu (HTTP {status}). Kiểm tra tên model, quyền truy cập và tham số API. Chi tiết: {detail[:500]}"
+    return f"Chưa thể kết nối AI: {detail[:700]}. Kiểm tra API key, model, hạn mức và Logs của Streamlit."
+
+
+# Render markdown/math consistently. Streamlit's Markdown renderer supports LaTeX,
+# but some providers return escaped delimiters; normalize only the delimiters, not math symbols.
+def render_chat_content(content):
+    import re
+    text = str(content or "")
+    text = text.replace("\\[", "$$").replace("\\]", "$$")
+    text = text.replace("\\(", "$").replace("\\)", "$")
+    # Convert common display-math delimiters when they arrived as literal escaped text.
+    text = re.sub(r"(?<!\\)\\begin\{(aligned|align|gathered|cases)\}", r"\\begin{\1}", text)
+    st.markdown(text, unsafe_allow_html=False)
 
 # ---------- Chat ----------
 with pages[0]:
-    st.subheader("Trợ lý học tập của bạn")
-    st.caption("Hỏi về Toán, Văn, Anh, Lý, Hóa, Sinh, Sử, Địa, ngoại ngữ, kỹ năng và kiến thức đời sống.")
+    st.markdown(f"""<div class="hero phucs-chat-header"><div style="display:flex;align-items:center;gap:14px"><div style="font-size:2.6rem">💌</div><div><h2 style="margin:0;color:#8f2854">{tr("Hộp thư P.H.U.C.S")}</h2><p style="margin:.25rem 0 0;color:#705565">{tr("Một góc nhỏ xinh để hỏi bài, tâm sự và cùng nhau học tốt hơn ✨")}</p></div><div style="margin-left:auto;background:#e5f8eb;color:#176b3a;border-radius:999px;padding:7px 12px;font-size:.82rem;font-weight:800">{tr("● AI đồng hành")}</div></div></div>""", unsafe_allow_html=True)
+    st.caption(tr("💗 Hỏi về Toán, Văn, Anh, Lý, Hóa, Sinh, Sử, Địa, ngoại ngữ, kỹ năng và kiến thức đời sống."))
     # Streamlit Cloud Secrets first, then environment/.env for local development.
     def setting(name, default=""):
         try:
@@ -388,19 +649,37 @@ with pages[0]:
 
     api_key = setting("GROQ_API_KEY") or setting("OPENAI_API_KEY")
     provider = "Groq" if setting("GROQ_API_KEY") else ("OpenAI" if setting("OPENAI_API_KEY") else "")
-    model = setting("GROQ_MODEL", "openai/gpt-oss-120b") if provider == "Groq" else setting("OPENAI_MODEL", "gpt-4.1-mini")
+    configured_model = setting("GROQ_MODEL", "openai/gpt-oss-120b") if provider == "Groq" else setting("OPENAI_MODEL", "gpt-4.1-mini")
+    # Resolve retired Groq IDs at runtime too, so stale Secrets cannot keep breaking chat.
+    model = configured_model
+    if provider == "Groq" and model in {"llama-3.3-70b-versatile", "llama-3.1-8b-instant", "meta-llama/llama-4-scout-17b-16e-instruct"}:
+        model = {"llama-3.3-70b-versatile": "openai/gpt-oss-120b", "llama-3.1-8b-instant": "openai/gpt-oss-20b", "meta-llama/llama-4-scout-17b-16e-instruct": "openai/gpt-oss-120b"}[model]
     if not api_key:
         st.warning("Chưa cấu hình API. Tạo GROQ_API_KEY tại console.groq.com/keys rồi thêm vào Streamlit Secrets để bật AI.")
     else:
         st.caption(f"Đang dùng AI qua {provider} · model: {model}")
+        if st.button("🔌 Kiểm tra kết nối AI", key="test_ai_connection"):
+            try:
+                with st.spinner("Đang kiểm tra kết nối AI..."):
+                    checked_model, check_text = test_ai_connection()
+                st.success(f"Kết nối thành công · model: {checked_model}")
+                st.caption(check_text)
+            except Exception as check_exc:
+                st.error(_friendly_ai_error(check_exc))
     for message in st.session_state.get("messages", []):
-        with st.chat_message(message["role"], avatar="🎓" if message["role"] == "assistant" else "🙂"):
-            st.markdown(message["content"])
-    uploaded = st.file_uploader("📷 Đính kèm ảnh bài tập (tùy chọn)", type=["png", "jpg", "jpeg", "webp"], key="chat_image")
+        with st.chat_message(message["role"], avatar="🎀" if message["role"] == "assistant" else "🌸"):
+            render_chat_content(message["content"])
+            if message["role"] == "assistant":
+                render_answer_voice(message["content"], _UI_LANG)
+    uploaded = st.file_uploader(tr("📷 Đính kèm ảnh bài tập (tùy chọn)"), type=["png", "jpg", "jpeg", "webp"], key="chat_image")
     if uploaded:
         st.image(uploaded, caption="Ảnh đính kèm sẽ được gửi cho model vision khi bạn đặt câu hỏi.", width=300)
-    use_web = st.checkbox("🌐 Tra cứu Internet và đính kèm nguồn khi trả lời", value=False, key="chat_use_web")
-    prompt = st.chat_input("Nhập câu hỏi hoặc bài tập bạn muốn giải...")
+    uploaded_video = st.file_uploader(tr("🎬 Đính kèm video bài giảng/bài tập (tùy chọn)"), type=["mp4", "mov", "webm", "mkv"], key="chat_video")
+    if uploaded_video:
+        st.video(uploaded_video)
+        st.caption("Video sẽ được lấy mẫu một số khung hình để AI phân tích; âm thanh video chưa tự động được chép lời trong luồng này.")
+    use_web = st.checkbox(tr("🌐 Tra cứu Internet và đính kèm nguồn khi trả lời"), value=False, key="chat_use_web")
+    prompt = st.chat_input(tr("Nhập câu hỏi hoặc bài tập bạn muốn giải..."))
     if prompt:
         augmented_prompt = prompt
         image_context = ""
@@ -412,6 +691,36 @@ with pages[0]:
                 augmented_prompt += "\n\n[Phân tích ảnh đính kèm từ vision]:\n" + image_context
             except Exception as image_exc:
                 st.warning(f"Không đọc được ảnh bằng model vision: {image_exc}. Hãy cấu hình model vision tương thích.")
+        if uploaded_video:
+            try:
+                import cv2, tempfile
+                video_bytes = uploaded_video.getvalue()
+                with tempfile.NamedTemporaryFile(suffix=Path(uploaded_video.name).suffix or ".mp4") as vf:
+                    vf.write(video_bytes); vf.flush()
+                    cap = cv2.VideoCapture(vf.name)
+                    total = int(cap.get(cv2.CAP_PROP_FRAME_COUNT) or 0)
+                    fps = float(cap.get(cv2.CAP_PROP_FPS) or 0)
+                    duration = (total / fps) if fps > 0 else 0
+                    frame_count = min(6, max(1, total))
+                    positions = sorted(set(int(i * max(total - 1, 0) / max(frame_count - 1, 1)) for i in range(frame_count)))
+                    frame_notes=[]
+                    with st.spinner("Đang trích xuất và phân tích khung hình video..."):
+                        for frame_no in positions:
+                            cap.set(cv2.CAP_PROP_POS_FRAMES, frame_no)
+                            ok, frame = cap.read()
+                            if not ok: continue
+                            ok, encoded = cv2.imencode(".jpg", frame, [int(cv2.IMWRITE_JPEG_QUALITY), 82])
+                            if not ok: continue
+                            stamp = (frame_no / fps) if fps > 0 else frame_no
+                            note = analyze_image(encoded.tobytes(), "image/jpeg", f"{prompt}. Đây là khung hình tại khoảng {stamp:.1f} giây; mô tả nội dung liên quan đến bài tập, giữ nguyên ký hiệu và chữ nhìn thấy.")
+                            frame_notes.append(f"Khung hình {stamp:.1f}s: {note}")
+                    cap.release()
+                if frame_notes:
+                    augmented_prompt += "\n\n[Phân tích các khung hình video theo thời gian]:\n" + "\n".join(frame_notes)
+                else:
+                    st.warning("Không trích xuất được khung hình. Hãy thử video MP4/H.264 ngắn hơn.")
+            except Exception as video_exc:
+                st.warning(f"Chưa phân tích được video: {video_exc}. Kiểm tra opencv-python-headless và model vision.")
         if use_web:
             try:
                 with st.spinner("Đang tìm nguồn trên Internet..."):
@@ -425,23 +734,23 @@ with pages[0]:
             except Exception as web_exc:
                 st.warning(f"Không tìm được web: {web_exc}")
         st.session_state.messages.append({"role": "user", "content": prompt})
-        with st.chat_message("user", avatar="🙂"):
-            st.markdown(prompt)
+        with st.chat_message("user", avatar="🌸"):
+            render_chat_content(prompt)
             if uploaded: st.image(uploaded, width=220)
         answer = None
         if api_key:
             try:
-                from openai import OpenAI
-                if provider == "Groq":
-                    client = OpenAI(api_key=api_key, base_url="https://api.groq.com/openai/v1")
-                else:
-                    client = OpenAI(api_key=api_key)
                 system_prompt = (
-                    "Bạn là P.H.U.C.S, trợ lý học tập thân thiện, lịch sự và chính xác. "
-                    "Trả lời bằng ngôn ngữ người dùng đang dùng. Giải thích từng bước, nêu giả định, "
-                    "phân biệt dữ kiện đã xác minh với điều chưa chắc chắn. Với y tế/pháp luật/tài chính, "
-                    "cung cấp thông tin giáo dục thận trọng và khuyến nghị chuyên gia khi phù hợp. "
-                    "Không bịa nguồn hoặc trích dẫn."
+                    "Bạn là P.H.U.C.S, trợ lý học tập đa môn, thân thiện và có trách nhiệm. "
+                    "Khi viết công thức Toán/Lý/Hóa, hãy dùng cú pháp LaTeX chuẩn: $...$ cho công thức trong dòng và $$...$$ cho công thức riêng dòng; "
+                    "không đặt công thức trong dấu nháy hoặc code block trừ khi người dùng hỏi về mã nguồn. Giữ nguyên các ký hiệu Unicode như ×, ÷, ≤, ≥, ≠, √, π, ∑, ∫, →, °, Ω và chỉ số dưới/trên khi phù hợp. "
+                    f"Trả lời bằng ngôn ngữ {_UI_LANG} (ngôn ngữ giao diện người dùng đã chọn: {language}); chỉ đổi ngôn ngữ khi người dùng yêu cầu. Với Toán và khoa học, nêu dữ kiện, "
+                    "công thức, đơn vị, các bước suy luận và tự kiểm tra kết quả khi có thể. Với bài trắc nghiệm, "
+                    "giải thích vì sao đáp án đúng và vì sao lựa chọn gần đúng có thể sai. Với ngôn ngữ, giải thích "
+                    "ngữ pháp và sắc thái dùng từ. Phân biệt dữ kiện đã xác minh với giả định/chưa chắc chắn; "
+                    "nếu thiếu dữ kiện, hỏi lại thay vì bịa. Không bịa nguồn hoặc trích dẫn. Khi có kết quả web, "
+                    "chỉ dùng nó làm manh mối và gắn nguồn phù hợp. Với y tế/pháp luật/tài chính, đưa thông tin "
+                    "giáo dục thận trọng, không thay thế chuyên gia."
                 )
                 msgs = [{"role": "system", "content": system_prompt}]
                 recent_messages = st.session_state.messages[-20:]
@@ -449,21 +758,23 @@ with pages[0]:
                 msgs += [{"role": m["role"], "content": (augmented_prompt if first_index + i == len(st.session_state.messages)-1 and m["role"] == "user" else m["content"])} for i, m in enumerate(recent_messages)]
                 with st.chat_message("assistant", avatar="🎓"):
                     with st.spinner("P.H.U.C.S đang suy nghĩ..."):
-                        response = client.chat.completions.create(model=model, messages=msgs, temperature=0.25)
-                        answer = response.choices[0].message.content
+                        response, model_used = chat_completion(msgs)
+                        answer = response.choices[0].message.content or "Mình nhận được phản hồi rỗng từ model. Bạn thử diễn đạt lại câu hỏi nhé."
+                        if model_used != model:
+                            st.info(f"Tự chuyển sang model đang được hỗ trợ: {model_used}")
                         if web_context:
                             answer += "\n\n### Nguồn tham khảo từ tìm kiếm web\n" + "\n".join([f"- [{item.get('title') or 'Nguồn tham khảo'}]({item.get('url')})" for item in web_data.get("results", [])[:5] if item.get("url")])
-                        st.markdown(answer)
+                        render_chat_content(answer)
             except Exception as e:
-                answer = f"Chưa thể kết nối AI: {e}. Hãy kiểm tra API key, hạn mức và tên model."
-                with st.chat_message("assistant", avatar="🎓"):
+                answer = _friendly_ai_error(e)
+                with st.chat_message("assistant", avatar="🎀"):
                     st.error(answer)
         else:
             answer = ("Mình đã nhận được câu hỏi! Để bật AI, hãy tạo khóa Groq tại "
                       "https://console.groq.com/keys rồi thêm `GROQ_API_KEY` vào Streamlit Secrets. "
                       "Sau khi cấu hình, mình sẽ giải thích từng bước và ưu tiên độ chính xác.")
-            with st.chat_message("assistant", avatar="🎓"):
-                st.markdown(answer)
+            with st.chat_message("assistant", avatar="🎀"):
+                render_chat_content(answer)
         st.session_state.messages.append({"role": "assistant", "content": answer})
         if not st.session_state.get("active_chat"):
             title = prompt[:48] + ("…" if len(prompt) > 48 else "")
@@ -722,6 +1033,50 @@ with pages[5]:
 with pages[6]:
     st.subheader("🎮 Góc giải trí lành mạnh")
     st.markdown("<div class='hero'><h3>🌸 Học vui mỗi ngày</h3><p>Chọn một thử thách ngắn để nạp lại năng lượng sau khi học.</p><div style='font-size:2rem;letter-spacing:.25rem'>🧩 🎯 🧠 🚀 🪄 🐼 🌈 🎨</div></div>", unsafe_allow_html=True)
+    with st.expander("🎧 Góc LOFI — nhạc không lời để tập trung", expanded=True):
+        st.markdown("<div class='hero'><h3>☁️ Study café · chill beats</h3><p>Chọn một gợi ý trong 30 playlist/bản nhạc tìm nhanh. Liên kết mở YouTube để phát bản nhạc tương ứng; trình phát radio LOFI bên dưới có thể nghe ngay trong ứng dụng.</p></div>", unsafe_allow_html=True)
+        lofi_tracks = [
+            ("01 · Snowfall — piano lofi", "Snowfall lofi hip hop instrumental piano"),
+            ("02 · Coffee & Rain", "coffee rain lofi chill instrumental"),
+            ("03 · Midnight Library", "midnight library lofi study instrumental"),
+            ("04 · Sakura Dreams", "sakura dreams japanese lofi instrumental"),
+            ("05 · Quiet Morning", "quiet morning lofi instrumental study"),
+            ("06 · Warm Cocoa", "warm cocoa cozy lofi instrumental"),
+            ("07 · Moonlight Walk", "moonlight walk chill lofi instrumental"),
+            ("08 · Cloud Nine", "cloud nine dreamy lofi instrumental"),
+            ("09 · Rainy Window", "rainy window lofi beats no vocals"),
+            ("10 · Blue Hour", "blue hour chillhop instrumental"),
+            ("11 · Study with Cats", "cute cat lofi study beats instrumental"),
+            ("12 · Stardust", "stardust space lofi instrumental"),
+            ("13 · Peach Soda", "peach soda chill lofi instrumental"),
+            ("14 · Autumn Leaves", "autumn leaves mellow lofi instrumental"),
+            ("15 · Sunday Nap", "sunday nap cozy lofi instrumental"),
+            ("16 · City Lights", "city lights night drive lofi instrumental"),
+            ("17 · Ocean Breeze", "ocean breeze chill lofi instrumental"),
+            ("18 · Lavender Sky", "lavender sky lofi piano instrumental"),
+            ("19 · Little Garden", "little garden relaxing lofi instrumental"),
+            ("20 · Train to Somewhere", "train journey lofi instrumental no vocals"),
+            ("21 · Floating Islands", "floating islands fantasy lofi instrumental"),
+            ("22 · Gentle Focus", "gentle focus study lofi instrumental"),
+            ("23 · Soft Rain on Roof", "soft rain on roof lofi instrumental"),
+            ("24 · After School", "after school chillhop lofi instrumental"),
+            ("25 · Paper Planes", "paper planes mellow lofi instrumental"),
+            ("26 · Pink Clouds", "pink clouds dreamy lofi instrumental"),
+            ("27 · Winter Tea", "winter tea cozy lofi instrumental"),
+            ("28 · Dreamy Kyoto", "dreamy kyoto japanese chill lofi instrumental"),
+            ("29 · Deep Work", "deep work focus beats instrumental lofi"),
+            ("30 · Good Night Study", "good night study lofi instrumental calm")
+        ]
+        selected_track = st.selectbox("🎼 Chọn nhạc để mở", [x[0] for x in lofi_tracks], key="lofi_track_choice")
+        query = next(q for title, q in lofi_tracks if title == selected_track)
+        from urllib.parse import quote_plus
+        st.link_button("▶️ Mở bản nhạc đã chọn trên YouTube", "https://www.youtube.com/results?search_query=" + quote_plus(query), use_container_width=True)
+        st.caption("Danh sách gồm 30 gợi ý tìm kiếm, không phải 30 tệp âm thanh được lưu trong ứng dụng. Chọn kết quả phù hợp trên YouTube để nghe.")
+        st.markdown("**📻 Radio LOFI — phát trực tiếp trong P.H.U.C.S**")
+        st.caption("Nguồn radio trực tuyến SomaFM Groove Salad. Nếu trình duyệt chặn luồng âm thanh, hãy thử tải lại trang hoặc kiểm tra quyền phát media.")
+        st.audio("https://ice1.somafm.com/groovesalad-128-mp3", format="audio/mp3")
+        st.markdown("**▶️ Video radio / livestream**")
+        st.components.v1.iframe("https://www.youtube-nocookie.com/embed/jfKfPfyJRdk", height=230, scrolling=False)
     if LOGO_PATH.exists():
         st.image(str(LOGO_PATH), width=150, caption="Mascot P.H.U.C.S — chinh phục tri thức")
     games = {
@@ -921,11 +1276,8 @@ with pages[8]:
                 st.text_area("Văn bản nhận diện", value=text, key="transcribed_result")
             except Exception as exc: st.error(str(exc))
         speech_text = st.text_area("Đọc câu trả lời thành tiếng", key="speech_text")
-        if st.button("🔊 Đọc văn bản", key="speak_btn"):
-            import json as _json
-            safe_text = _json.dumps(speech_text, ensure_ascii=False)
-            st.components.v1.html(f"""<button id="phucs-speak">▶ Phát giọng đọc</button><script>const phucsText={safe_text};document.getElementById("phucs-speak").onclick=()=>{{const u=new SpeechSynthesisUtterance(phucsText);u.lang="vi-VN";speechSynthesis.cancel();speechSynthesis.speak(u);}};</script>""", height=60)
-        st.caption("Nhận diện giọng nói cần API transcription. Đọc văn bản dùng giọng hệ thống của trình duyệt, chất lượng tùy thiết bị.")
+        if speech_text.strip():
+            render_answer_voice(speech_text, _UI_LANG)
     elif mode == "Tạo ảnh AI":
         prompt = st.text_area("Mô tả ảnh muốn tạo", placeholder="Một mascot học tập màu hồng pastel, sách và mũ tốt nghiệp...")
         if st.button("🎨 Tạo ảnh", type="primary", key="generate_img_btn"):
@@ -1010,8 +1362,25 @@ with pages[9]:
 with pages[10]:
     st.subheader("☁️ P.H.U.C.S Plus & Lưu trữ đám mây")
     st.markdown("### P.H.U.C.S Plus")
-    st.write("Giá dự kiến: **35.000 VNĐ/năm**. Bạn cần tạo sản phẩm và giá định kỳ trong Stripe Dashboard trước khi bật thanh toán.")
-    st.caption("Không đánh dấu tài khoản là Plus chỉ vì người dùng quay về trang thành công; trạng thái trả phí phải được xác minh bằng webhook Stripe và lưu trong database đáng tin cậy.")
+    st.write("Giá Plus: **35.000 VNĐ/năm**.")
+    st.caption("Thanh toán ngân hàng tự động xác nhận qua webhook SePay. Nội dung chuyển khoản phải đúng mã riêng bên dưới; hệ thống chỉ kích hoạt khi nhận được giao dịch tiền vào đủ 35.000 VNĐ.")
+    pay_code = f"PHUCS-{uid}"
+    qr_path = APP_DIR / "assets" / "payment_qr.png"
+    pay_col, info_col = st.columns([1, 1])
+    with pay_col:
+        if qr_path.exists():
+            st.image(str(qr_path), caption="QR ngân hàng do chủ ứng dụng cung cấp", use_container_width=True)
+    with info_col:
+        st.markdown("#### Thông tin chuyển khoản")
+        st.metric("Số tiền", "35.000 VNĐ")
+        st.code(pay_code, language=None)
+        st.caption("Sao chép chính xác mã này vào nội dung chuyển khoản. Không sửa hoặc thêm ký tự.")
+        st.button("📋 Sao chép mã chuyển khoản", on_click=lambda: st.toast("Mã chuyển khoản: " + pay_code), key="copy_pay_code")
+        st.info("Sau khi ngân hàng/SePay gửi webhook hợp lệ, Plus được kích hoạt tự động trong 365 ngày. Không tải ảnh biên lai để tự kích hoạt.")
+    if not (setting("SEPAY_WEBHOOK_API_KEY") or setting("SEPAY_WEBHOOK_HMAC_SECRET")):
+        st.warning("Chưa cấu hình xác thực webhook SePay. Chuyển khoản chưa thể tự xác nhận cho đến khi triển khai api_server.py và thêm SEPAY_WEBHOOK_API_KEY hoặc SEPAY_WEBHOOK_HMAC_SECRET vào môi trường máy chủ.")
+    st.divider()
+    st.markdown("#### Thanh toán thẻ (tùy chọn)")
     email = st.text_input("Email nhận hóa đơn (tùy chọn)", key="billing_email")
     if st.button("💳 Thanh toán Plus", type="primary"):
         try:
